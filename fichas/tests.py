@@ -852,6 +852,52 @@ class FichaViewsTests(TestCase):
             ficha=self.ficha, campo='status', valor_novo='morta',
         ).exists())
 
+    def test_combat_tracker_enforces_unambiguous_condition_action_restrictions(self):
+        self.client.force_login(self.master)
+        encontro = EncontroCombate.objects.create(criado_por=self.master, nome='Restrições')
+        participante = ParticipanteCombate.objects.create(
+            encontro=encontro, ficha=self.ficha, nome=self.ficha.nome, iniciativa=10,
+        )
+        encontro.indice_turno = 0
+        encontro.save(update_fields=('indice_turno',))
+        url = reverse(
+            'fichas:registrar_acao_combate',
+            kwargs={'pk': encontro.pk, 'participante_pk': participante.pk},
+        )
+
+        for slug, acao in (('atordoado', 'padrao'), ('pasmo', 'movimento')):
+            condicao = Condicao.objects.create(
+                nome=slug.capitalize(), slug=slug, fonte='Personalizado', resumo='',
+            )
+            FichaCondicao.objects.create(ficha=self.ficha, condicao=condicao)
+            response = self.client.post(url, {'acao': acao}, follow=True)
+            self.assertContains(response, 'A condição ativa impede ações normais')
+            participante.refresh_from_db()
+            self.assertFalse(participante.acao_padrao_usada)
+            self.assertEqual(participante.acoes_movimento_usadas, 0)
+            FichaCondicao.objects.filter(ficha=self.ficha, condicao=condicao).delete()
+
+        enjoado = Condicao.objects.create(
+            nome='Enjoado', slug='enjoado', fonte='Personalizado', resumo='',
+        )
+        FichaCondicao.objects.create(ficha=self.ficha, condicao=enjoado)
+        response = self.client.post(url, {'acao': 'completa'}, follow=True)
+        self.assertContains(response, 'Enjoado não permite ação completa')
+        participante.refresh_from_db()
+        self.assertFalse(participante.acao_completa_usada)
+        self.assertEqual(self.client.post(url, {'acao': 'padrao'}).status_code, 302)
+        participante.refresh_from_db()
+        self.assertTrue(participante.acao_padrao_usada)
+
+        inconsciente = Condicao.objects.create(
+            nome='Inconsciente', slug='inconsciente', fonte='Personalizado', resumo='',
+        )
+        FichaCondicao.objects.create(ficha=self.ficha, condicao=inconsciente)
+        response = self.client.post(url, {'acao': 'reacao_defensiva'}, follow=True)
+        self.assertContains(response, 'não pode realizar ações ou reações')
+        participante.refresh_from_db()
+        self.assertFalse(participante.reacao_defensiva_usada)
+
     def test_ending_encounter_removes_end_of_scene_conditions_and_preserves_others(self):
         expires = Condicao.objects.create(
             nome='Condição até o fim da cena',

@@ -125,7 +125,8 @@ Consulte também `docs/COMO_USAR.md` para os fluxos de jogadores e mestre, `docs
 - Condições agora aceitam duração opcional de 1 a 99 turnos por ficha. O contador diminui no início do turno do personagem afetado, expira e registra auditoria ao chegar a zero; a duração é mantida ao escalar uma condição. Condições sem duração permanecem sem temporizador.
 - Morrendo permanece sob o contador letal da cena e não usa o temporizador genérico.
 - Esta funcionalidade não presume duração de nenhum efeito do catálogo: o mestre/jogador autorizado informa a duração da instância. Ainda falta automatizar efeitos dependentes de ação e validação de regras específicas.
-- Verificação desta continuação: **113 testes passaram**, incluindo validação dos limites, decremento/expiração, auditoria, polling, escalada e separação do contador de Morrendo. `check`, `makemigrations --check --dry-run` e `git diff --check` sem problemas.
+- Verificação desta continuação: **114 testes passaram**, incluindo validação dos limites, decremento/expiração, auditoria, polling, escalada, restrições de ação e separação do contador de Morrendo. `check`, `makemigrations --check --dry-run` e `git diff --check` sem problemas.
+- O rastreador agora também aplica no servidor as restrições de ação de Atordoado/Pasmo, Enjoado e Inconsciente. Restrições dependentes de contexto (ações mentais, alvos, alcance, etc.) seguem pendentes.
 
 ## Rechecagem anterior em 2026-11-04
 

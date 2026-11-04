@@ -2538,11 +2538,25 @@ def registrar_acao_combate(request, pk, participante_pk):
             ficha = get_object_or_404(fichas_visiveis_para(request.user), pk=participante.ficha_id)
             if not pode_editar_ficha(request.user, ficha):
                 raise PermissionDenied
-            if ficha.pv_atual <= 0:
-                messages.error(request, 'Personagem inconsciente não pode realizar ações normais.')
+        acao = request.POST.get('acao')
+        if ficha:
+            condicoes_ativas = set(
+                ficha.condicoes.values_list('condicao__slug', flat=True)
+            )
+            acoes = {'padrao', 'movimento', 'completa', 'reacao_defensiva'}
+            acoes_normais = {'padrao', 'movimento', 'completa'}
+            if acao in acoes and (
+                ficha.pv_atual <= 0 or 'inconsciente' in condicoes_ativas
+            ):
+                messages.error(request, 'Personagem inconsciente não pode realizar ações ou reações.')
+                return redirect('fichas:encontro_combate', pk=pk)
+            if acao in acoes_normais and condicoes_ativas.intersection({'atordoado', 'pasmo'}):
+                messages.error(request, 'A condição ativa impede ações normais neste turno.')
+                return redirect('fichas:encontro_combate', pk=pk)
+            if acao == 'completa' and 'enjoado' in condicoes_ativas:
+                messages.error(request, 'Enjoado não permite ação completa.')
                 return redirect('fichas:encontro_combate', pk=pk)
 
-        acao = request.POST.get('acao')
         if acao == 'padrao':
             if participante.acao_padrao_usada or participante.acao_completa_usada or participante.acoes_movimento_usadas >= 2:
                 messages.error(request, 'A ação padrão não está disponível neste turno.')
