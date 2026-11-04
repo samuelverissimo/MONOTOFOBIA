@@ -5,8 +5,9 @@ Atualizado em 2026-11-04. Este documento resume o estado conhecido do projeto pa
 ## Estado do repositório
 
 - Projeto: Django para campanha de Ordem Paranormal RPG, workspace `MONOTOFOBIA`.
-- Branch: `main`; o último estado publicado neste registro é `7ec7639` em `origin/main`. O incremento atual acrescenta validação dos efeitos de condições no carregador, com teste de rollback.
+- Branch: `main`; o último estado publicado neste registro é `611d27b` em `origin/main`.
 - Commits publicados nesta rodada:
+  - `611d27b` `fix: validate condition effects when loading rules`
   - `7ec7639` `feat: validate power prerequisites and expire scene conditions`
   - `4faacfc` `feat: complete campaign management foundations`
 - Commits anteriores de fase:
