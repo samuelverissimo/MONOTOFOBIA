@@ -22,6 +22,21 @@
             <h2>Status</h2>
             <p>{{ ficha.classe|default:'Sem classe' }} · {{ ficha.get_status_display }}</p>
             {% if ficha.nex %}<p>NEX {{ ficha.nex }}%</p>{% endif %}
+            {% if pode_editar and ficha.status == 'ativa' %}
+                <form method="post" action="{% url 'fichas:status' ficha.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="status" value="arquivada">
+                    <input type="hidden" name="versao" value="{{ ficha.versao }}">
+                    <button class="button button-secondary" type="submit">Arquivar ficha</button>
+                </form>
+            {% elif pode_editar and ficha.status == 'arquivada' %}
+                <form method="post" action="{% url 'fichas:status' ficha.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="status" value="ativa">
+                    <input type="hidden" name="versao" value="{{ ficha.versao }}">
+                    <button class="button button-secondary" type="submit">Restaurar ficha</button>
+                </form>
+            {% endif %}
             <form hidden>{% csrf_token %}</form>
             <div class="resource-grid" aria-label="Recursos">
                 <section class="resource" data-resource-panel="pv">

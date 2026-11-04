@@ -38,7 +38,14 @@ from fichas.regras import (
     rolar_teste,
     validar_atributos_iniciais,
 )
-from fichas.forms import AtributosFichaForm, ConceitoFichaForm, FichaEdicaoForm, ItemInventarioForm
+from fichas.forms import (
+    AtributosFichaForm,
+    ConceitoFichaForm,
+    ConfiguracaoMesaForm,
+    FichaEdicaoForm,
+    FichaStatusForm,
+    ItemInventarioForm,
+)
 
 User = get_user_model()
 
@@ -152,6 +159,23 @@ class FichaInventarioFormTests(SimpleTestCase):
         self.assertFalse(ItemInventarioForm({**dados, 'espacos': -1}).is_valid())
         self.assertFalse(ItemInventarioForm({**dados, 'quantidade': 0}).is_valid())
         self.assertFalse(ItemInventarioForm({**dados, 'estado': 'voando'}).is_valid())
+
+
+class ConfiguracaoMesaFormTests(SimpleTestCase):
+    def test_form_accepts_only_supported_configuration_values(self):
+        dados = {
+            'modo_recursos': 'padrao', 'jogador_pode_subir_nex': 'on',
+            'max_fichas_ativas': 4, 'sistema_progressao': 'patentes',
+        }
+        form = ConfiguracaoMesaForm(dados)
+        self.assertTrue(form.is_valid())
+        self.assertNotIn('sistema_progressao', form.fields)
+        self.assertFalse(ConfiguracaoMesaForm({**dados, 'modo_recursos': 'inventado'}).is_valid())
+        self.assertFalse(ConfiguracaoMesaForm({**dados, 'max_fichas_ativas': 0}).is_valid())
+
+    def test_status_form_allows_only_archive_and_restore(self):
+        self.assertTrue(FichaStatusForm({'status': 'arquivada', 'versao': 1}).is_valid())
+        self.assertFalse(FichaStatusForm({'status': 'morta', 'versao': 1}).is_valid())
 
 
 class FichaPermissionTests(TestCase):
@@ -382,6 +406,99 @@ class FichaViewsTests(TestCase):
         })
         self.assertEqual(response.status_code, 400)
         self.assertEqual(ItemInventario.objects.filter(ficha=self.ficha).count(), 1)
+
+
+    def test_active_limit_is_enforced_and_archiving_frees_a_slot(self):
+        ConfiguracaoMesa.objects.create(max_fichas_ativas=1)
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse('fichas:iniciar'))
+        self.assertRedirects(response, reverse('home'))
+        self.assertNotIn('fichas.criacao', self.client.session)
+
+        response = self.client.post(reverse('fichas:status', kwargs={'pk': self.ficha.pk}), {
+            'status': 'arquivada', 'versao': 1,
+        })
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.ficha.refresh_from_db()
+        self.assertEqual((self.ficha.status, self.ficha.versao), ('arquivada', 2))
+        response = self.client.get(reverse('fichas:iniciar'))
+        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 1}))
+
+        response = self.client.post(reverse('fichas:status', kwargs={'pk': self.ficha.pk}), {
+            'status': 'ativa', 'versao': 1,
+        })
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.ficha.refresh_from_db()
+        self.assertEqual(self.ficha.status, 'arquivada')
+
+    def test_restore_cannot_exceed_active_limit_and_foreign_status_is_hidden(self):
+        ConfiguracaoMesa.objects.create(max_fichas_ativas=1)
+        arquivada = Ficha.objects.create(
+            dono=self.owner, nome='Arquivada', nex=5, status='arquivada',
+        )
+        self.client.force_login(self.owner)
+        response = self.client.post(reverse('fichas:status', kwargs={'pk': arquivada.pk}), {
+            'status': 'ativa', 'versao': 1,
+        })
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': arquivada.pk}))
+        arquivada.refresh_from_db()
+        self.assertEqual(arquivada.status, 'arquivada')
+
+        self.client.force_login(self.other)
+        response = self.client.post(reverse('fichas:status', kwargs={'pk': self.ficha.pk}), {
+            'status': 'arquivada', 'versao': 1,
+        })
+        self.assertEqual(response.status_code, 404)
+
+    def test_creation_rechecks_active_limit_at_final_submission(self):
+        ConfiguracaoMesa.objects.create(max_fichas_ativas=2)
+        self.client.force_login(self.owner)
+        self.client.get(reverse('fichas:iniciar'))
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {
+            'nome': 'Nova agente', 'conceito': 'Investigadora', 'aparencia': 'Casaco',
+            'personalidade': 'Atenta', 'historia': 'Chegou à Ordem.', 'objetivo': 'Investigar',
+        })
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 2}), {
+            'agilidade': 3, 'forca': 2, 'intelecto': 0, 'presenca': 1, 'vigor': 3,
+        })
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 3}), {'origem': self.origem.pk})
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 4}), {'classe': self.classe.pk})
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 5}), {
+            'pericia_obrigatoria_0': self.luta.pk, 'pericias_escolhidas': [self.pontaria.pk],
+        })
+        Ficha.objects.create(dono=self.owner, nome='Criada em outra sessão', nex=5)
+
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 6}), {'confirmar': 'on'})
+        self.assertRedirects(response, reverse('home'))
+        self.assertFalse(Ficha.objects.filter(dono=self.owner, nome='Nova agente').exists())
+        self.assertNotIn('fichas.criacao', self.client.session)
+
+
+class ConfiguracaoMesaViewsTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(username='settings-owner', password=get_random_string(32))
+        self.master = User.objects.create_superuser(
+            username='settings-master', email='settings-master@example.com', password=get_random_string(32)
+        )
+
+    def test_configuration_is_master_only_and_ignores_unsupported_fields(self):
+        url = reverse('fichas:configurar_mesa')
+        self.client.force_login(self.owner)
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+        self.client.force_login(self.master)
+        self.assertEqual(self.client.get(url).status_code, 200)
+        response = self.client.post(url, {
+            'modo_recursos': 'sem_sanidade', 'jogador_pode_subir_nex': 'on',
+            'max_fichas_ativas': 2, 'sistema_progressao': 'patentes',
+            'ferimentos_debilitantes': 'on', 'dono': self.owner.pk,
+        })
+        self.assertRedirects(response, url)
+        mesa = ConfiguracaoMesa.objects.get(pk=1)
+        self.assertEqual((mesa.modo_recursos, mesa.jogador_pode_subir_nex, mesa.max_fichas_ativas),
+                         ('sem_sanidade', True, 2))
+        self.assertEqual(mesa.sistema_progressao, 'nex')
+        self.assertFalse(mesa.ferimentos_debilitantes)
 
 
 class ProgressaoNexViewsTests(TestCase):

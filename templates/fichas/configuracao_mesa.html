@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Configuração da mesa | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<main class="page form-page">
+    <a href="{% url 'home' %}">Voltar às fichas</a>
+    <h1>Configuração da mesa</h1>
+    <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button class="button" type="submit">Salvar configurações</button>
+    </form>
+</main>
+{% endblock %}

@@ -46,6 +46,11 @@ Todos os registros têm `fonte`, `slug` e indicação de `personalizado`. Os res
 - Quantidade, estado, categoria e espaços usam listas/limites explícitos. A ficha mostra a carga total calculada com `espacos_usados` e a capacidade por Força; exceder a capacidade é sinalizado, não impede registrar itens.
 - O catálogo completo de equipamentos, armas e proteções não foi carregado nesta fase; nomes e descrições dos livros continuam fora dos dados de inventário manual.
 
+## Configuração da mesa (Fase 6)
+
+- O painel é restrito ao superusuário e expõe somente modo de recursos, permissão para jogadores avançarem NEX e limite de fichas ativas. Opções de progressão ainda não implementadas não podem ser ativadas pelo formulário.
+- O limite de fichas ativas é verificado ao iniciar e ao concluir a criação. Fichas ativas podem ser arquivadas/restauradas; a restauração respeita o limite e todas as transições usam a versão otimista da ficha.
+
 ## Limitações de extração
 
 O extrator cria um TXT por página física do PDF. Para o miolo do OPRPG, as amostras confirmam que a página impressa equivale à página PDF menos 10; o campo `fonte` usa a página impressa. Para SaH, as páginas impressas foram conferidas individualmente e não se aplica o deslocamento do livro básico.

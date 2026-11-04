@@ -15,7 +15,9 @@ from .forms import (
     AvancoNexForm,
     ClasseFichaForm,
     ConceitoFichaForm,
+    ConfiguracaoMesaForm,
     FichaEdicaoForm,
+    FichaStatusForm,
     ItemInventarioAjusteForm,
     ItemInventarioForm,
     OrigemFichaForm,
@@ -58,9 +60,17 @@ CAMPOS_AUDITAVEIS = (
 )
 
 
+def _mesa_configuracao():
+    return ConfiguracaoMesa.objects.filter(pk=1).first() or ConfiguracaoMesa()
+
+
 @login_required
 @require_GET
 def iniciar_criacao(request):
+    mesa = _mesa_configuracao()
+    if request.user.fichas.filter(status='ativa').count() >= mesa.max_fichas_ativas:
+        messages.error(request, 'Você já atingiu o limite de fichas ativas da mesa.')
+        return redirect('home')
     request.session[SESSAO_WIZARD] = {
         'etapa': 1,
         'livre': bool(is_mestre(request.user) and request.GET.get('livre') == '1'),
@@ -186,8 +196,12 @@ def _criar_ficha(request, estado):
             argumentos['pd_atual'] = calcular_pd_max(slug, presenca=atributos['presenca'], nex=5, estagio=1)
 
     with transaction.atomic():
+        dono = request.user.__class__.objects.select_for_update().get(pk=request.user.pk)
+        mesa = ConfiguracaoMesa.objects.select_for_update().filter(pk=1).first() or ConfiguracaoMesa()
+        if dono.fichas.filter(status='ativa').count() >= mesa.max_fichas_ativas:
+            return None
         ficha = Ficha.objects.create(
-            dono=request.user,
+            dono=dono,
             nome=dados['nome'],
             conceito=dados.get('conceito', ''),
             aparencia=dados.get('aparencia', ''),
@@ -454,6 +468,11 @@ def criar_ficha(request, etapa):
         if etapa == len(ETAPAS):
             ficha = _criar_ficha(request, estado)
             if ficha is None:
+                mesa = _mesa_configuracao()
+                if request.user.fichas.filter(status='ativa').count() >= mesa.max_fichas_ativas:
+                    request.session.pop(SESSAO_WIZARD, None)
+                    messages.error(request, 'Você já atingiu o limite de fichas ativas da mesa.')
+                    return redirect('home')
                 form.add_error(None, 'Os dados da sessão não passaram pela validação final. Inicie novamente.')
                 request.session.pop(SESSAO_WIZARD, None)
                 return render(request, 'fichas/wizard.html', {
@@ -544,6 +563,48 @@ def _contexto_detalhe(request, ficha, formulario_avanco=None, formulario_item=No
 def detalhe_ficha(request, pk):
     ficha = get_object_or_404(fichas_visiveis_para(request.user), pk=pk)
     return render(request, 'fichas/detalhe.html', _contexto_detalhe(request, ficha))
+
+
+@login_required
+@require_POST
+def alterar_status_ficha(request, pk):
+    ficha = _ficha_editavel(request, pk)
+    form = FichaStatusForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, 'Status inválido; a ficha não foi alterada.')
+        return redirect('fichas:detalhe', pk=pk)
+
+    with transaction.atomic():
+        ficha = Ficha.objects.select_for_update().filter(pk=pk).first()
+        if ficha is None:
+            return render(request, '404.html', status=404)
+        if ficha.versao != form.cleaned_data['versao']:
+            messages.error(request, 'A ficha mudou em outra sessão. Recarregue antes de alterar o status.')
+            return redirect('fichas:detalhe', pk=pk)
+        status_novo = form.cleaned_data['status']
+        if ficha.status not in ('ativa', 'arquivada') or ficha.status == status_novo:
+            messages.error(request, 'Esta transição de status não é permitida.')
+            return redirect('fichas:detalhe', pk=pk)
+        if status_novo == 'ativa':
+            dono = request.user.__class__.objects.select_for_update().get(pk=ficha.dono_id)
+            mesa = ConfiguracaoMesa.objects.select_for_update().filter(pk=1).first() or ConfiguracaoMesa()
+            ativas = dono.fichas.filter(status='ativa').exclude(pk=ficha.pk).count()
+            if ativas >= mesa.max_fichas_ativas:
+                messages.error(request, 'O limite de fichas ativas já foi atingido.')
+                return redirect('fichas:detalhe', pk=pk)
+        agora = timezone.now()
+        atualizados = Ficha.objects.filter(pk=pk, versao=form.cleaned_data['versao']).update(
+            status=status_novo, versao=F('versao') + 1, atualizada_em=agora,
+        )
+        if not atualizados:
+            messages.error(request, 'A ficha mudou em outra sessão. Recarregue antes de alterar o status.')
+            return redirect('fichas:detalhe', pk=pk)
+        LogAlteracao.objects.create(
+            ficha=ficha, usuario=request.user, e_mestre=is_mestre(request.user),
+            campo='status', valor_antigo=ficha.status, valor_novo=status_novo,
+        )
+    messages.success(request, 'Status da ficha atualizado.')
+    return redirect('fichas:detalhe', pk=pk)
 
 
 @login_required
@@ -668,3 +729,29 @@ def editar_ficha(request, pk):
             mestre=mestre,
         )
     return render(request, 'fichas/editar.html', {'form': form, 'ficha': ficha})
+
+
+@login_required
+def configurar_mesa(request):
+    if not is_mestre(request.user):
+        return HttpResponseForbidden('Somente o mestre pode configurar a mesa.')
+    mesa = ConfiguracaoMesa.objects.filter(pk=1).first()
+    if mesa is None:
+        mesa = ConfiguracaoMesa.objects.create()
+    if request.method == 'POST':
+        form = ConfiguracaoMesaForm(request.POST)
+        if form.is_valid():
+            with transaction.atomic():
+                mesa = ConfiguracaoMesa.objects.select_for_update().get(pk=1)
+                for campo, valor in form.cleaned_data.items():
+                    setattr(mesa, campo, valor)
+                mesa.save(update_fields=tuple(form.cleaned_data))
+            messages.success(request, 'Configurações da mesa salvas.')
+            return redirect('fichas:configurar_mesa')
+    else:
+        form = ConfiguracaoMesaForm(initial={
+            'modo_recursos': mesa.modo_recursos,
+            'jogador_pode_subir_nex': mesa.jogador_pode_subir_nex,
+            'max_fichas_ativas': mesa.max_fichas_ativas,
+        })
+    return render(request, 'fichas/configuracao_mesa.html', {'form': form, 'mesa': mesa})

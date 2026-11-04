@@ -1,7 +1,7 @@
 from django import forms
 from django.core.exceptions import ValidationError
 
-from fichas.models import Classe, ItemCatalogo, ItemInventario, Origem, Pericia
+from fichas.models import Classe, ConfiguracaoMesa, Ficha, ItemCatalogo, ItemInventario, Origem, Pericia
 from fichas.regras import ATRIBUTOS, NEX_VALIDOS, pericias_treinadas_disponiveis, validar_atributos_iniciais
 
 
@@ -201,3 +201,16 @@ class ItemInventarioForm(forms.Form):
 class ItemInventarioAjusteForm(forms.Form):
     quantidade = forms.IntegerField(min_value=1, max_value=999)
     estado = forms.ChoiceField(choices=ItemInventario.ESTADOS)
+
+
+class ConfiguracaoMesaForm(forms.Form):
+    modo_recursos = forms.ChoiceField(label='Modo de recursos', choices=ConfiguracaoMesa.MODOS_RECURSOS)
+    jogador_pode_subir_nex = forms.BooleanField(label='Jogadores podem avançar NEX', required=False)
+    max_fichas_ativas = forms.IntegerField(label='Máximo de fichas ativas', min_value=1, max_value=20)
+
+
+class FichaStatusForm(forms.Form):
+    status = forms.ChoiceField(
+        choices=[(valor, rotulo) for valor, rotulo in Ficha.STATUS if valor in ('ativa', 'arquivada')],
+    )
+    versao = forms.IntegerField(widget=forms.HiddenInput)
