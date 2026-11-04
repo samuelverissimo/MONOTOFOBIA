@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Criar conta | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<main class="page login-page">
+    <section class="login-card" aria-labelledby="register-title">
+        <h1 id="register-title">Criar conta</h1>
+        <p class="muted">Preencha os dados para se cadastrar.</p>
+
+        {% if form.non_field_errors %}{{ form.non_field_errors }}{% endif %}
+
+        <form method="post">
+            {% csrf_token %}
+            <div class="field">
+                <label for="id_username">Usuário</label>
+                {{ form.username }}
+                {{ form.username.errors }}
+            </div>
+            <div class="field">
+                <label for="id_email">E-mail</label>
+                {{ form.email }}
+                {{ form.email.errors }}
+            </div>
+            <div class="field">
+                <label for="id_password1">Senha</label>
+                {{ form.password1 }}
+                {{ form.password1.errors }}
+            </div>
+            <div class="field">
+                <label for="id_password2">Confirme a senha</label>
+                {{ form.password2 }}
+                {{ form.password2.errors }}
+            </div>
+            <button class="button" type="submit">Cadastrar</button>
+        </form>
+        <p class="muted"><a href="{% url 'login' %}">Já tenho conta</a></p>
+    </section>
+</main>
+{% endblock %}

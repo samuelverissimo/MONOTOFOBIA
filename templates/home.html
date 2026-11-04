@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Início | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<div class="page">
+    <header class="topbar">
+        <p>Olá, {{ user.username }}</p>
+        <nav aria-label="Conta">
+            <a href="{% url 'password_change' %}">Alterar senha</a>
+            <form method="post" action="{% url 'logout' %}">
+                {% csrf_token %}
+                <button class="button" type="submit">Sair</button>
+            </form>
+        </nav>
+    </header>
+    <main class="home-content">
+        <!-- TODO: conteúdo da home será implementado depois -->
+        <p class="muted">Em breve.</p>
+    </main>
+</div>
+{% endblock %}

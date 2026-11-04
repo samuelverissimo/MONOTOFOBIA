@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Acesso temporariamente bloqueado | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<main class="page login-page">
+    <section class="login-card">
+        <h1>Acesso temporariamente bloqueado</h1>
+        <p class="muted">Não foi possível concluir o acesso agora. Tente novamente mais tarde.</p>
+        <a href="{% url 'login' %}">Voltar ao login</a>
+    </section>
+</main>
+{% endblock %}

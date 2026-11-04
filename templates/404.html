@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Página não encontrada | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<main class="page login-page">
+    <section class="login-card">
+        <h1>Página não encontrada</h1>
+        <p class="muted">O endereço solicitado não existe.</p>
+        <a href="{% url 'home' %}">Voltar ao início</a>
+    </section>
+</main>
+{% endblock %}

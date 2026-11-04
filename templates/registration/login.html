@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Entrar | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<main class="page login-page">
+    <section class="login-card" aria-labelledby="login-title">
+        <h1 id="login-title">Entrar</h1>
+        <p class="muted">Acesse sua conta para continuar.</p>
+
+        {% if form.non_field_errors %}
+            {{ form.non_field_errors }}
+        {% endif %}
+
+        <form method="post">
+            {% csrf_token %}
+            {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+
+            <div class="field">
+                <label for="id_username">Usuário</label>
+                <input type="text" name="username" id="id_username" autocomplete="username" required autofocus>
+                {{ form.username.errors }}
+            </div>
+
+            <div class="field">
+                <label for="id_password">Senha</label>
+                <input type="password" name="password" id="id_password" autocomplete="current-password" required>
+                {{ form.password.errors }}
+            </div>
+
+            <button class="button" type="submit">Entrar</button>
+        </form>
+        <p class="muted"><a href="{% url 'register' %}">Criar conta</a></p>
+    </section>
+</main>
+{% endblock %}
