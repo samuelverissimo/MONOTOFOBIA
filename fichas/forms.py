@@ -8,18 +8,26 @@ from fichas.models import (
     EncontroCombate,
     Ficha,
     FerimentoDebilitante,
+    HabilidadeFicha,
     ItemCatalogo,
     ItemInventario,
     ParticipanteCombate,
     Origem,
+    Patente,
     RegistroPrestigio,
     Pericia,
     Poder,
     Ritual,
     Trilha,
 )
-from fichas.pre_requisitos import poder_atende_pre_requisitos
-from fichas.regras import ATRIBUTOS, NEX_VALIDOS, pericias_treinadas_disponiveis, validar_atributos_iniciais
+from fichas.pre_requisitos import poder_atende_pre_requisitos, trilha_atende_pre_requisitos
+from fichas.regras import (
+    ATRIBUTOS,
+    NEX_VALIDOS,
+    nex_equivalente_por_nivel,
+    pericias_treinadas_disponiveis,
+    validar_atributos_iniciais,
+)
 
 
 class ConceitoFichaForm(forms.Form):
@@ -98,9 +106,13 @@ class OrigemFichaForm(forms.Form):
 class ClasseFichaForm(forms.Form):
     classe = forms.ModelChoiceField(queryset=Classe.objects.order_by('nome'), label='Classe', empty_label='Escolha uma classe', required=False)
 
-    def __init__(self, *args, livre=False, **kwargs):
+    def __init__(self, *args, livre=False, mesa=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['classe'].required = not livre
+        if mesa and mesa.sistema_progressao == 'patentes':
+            self.fields['classe'].queryset = self.fields['classe'].queryset.exclude(
+                slug='sobrevivente',
+            )
 
 
 class PericiasFichaForm(forms.Form):
@@ -116,7 +128,7 @@ class PericiasFichaForm(forms.Form):
                 queryset=Pericia.objects.order_by('nome'),
                 label='Perícias (opcional)',
                 required=False,
-                widget=forms.CheckboxSelectMultiple,
+                widget=forms.CheckboxSelectMultiple(attrs={'class': 'checklist'}),
             )
             return
 
@@ -143,7 +155,7 @@ class PericiasFichaForm(forms.Form):
             queryset=todas.exclude(slug__in=origem_slugs),
             label=f'Escolha {self.quantidade_escolhas} perícias adicionais',
             required=self.quantidade_escolhas > 0,
-            widget=forms.CheckboxSelectMultiple,
+            widget=forms.CheckboxSelectMultiple(attrs={'class': 'checklist'}),
             help_text='Não repita perícias fornecidas pela origem ou pelos requisitos da classe.',
         )
 
@@ -168,6 +180,241 @@ class PericiasFichaForm(forms.Form):
         return dados
 
 
+class CriacaoInicialForm(forms.Form):
+    confirmar = forms.BooleanField(label='Confirmo os dados iniciais da ficha')
+    trilha = forms.ModelChoiceField(
+        queryset=Trilha.objects.none(),
+        label='Trilha (opcional)',
+        empty_label='Sem trilha por enquanto',
+        required=False,
+    )
+    nex_inicial = forms.ChoiceField(label='NEX inicial')
+    nivel_inicial = forms.ChoiceField(label='Nível inicial')
+    nex_paranormal = forms.ChoiceField(label='NEX paranormal inicial')
+    estagio_inicial = forms.ChoiceField(label='Estágio inicial')
+    patente_inicial = forms.ModelChoiceField(
+        queryset=Patente.objects.none(),
+        label='Patente inicial',
+        empty_label=None,
+        required=False,
+    )
+    cicatrizado_elemento = forms.ChoiceField(
+        label='Elemento de Cicatrizado',
+        choices=(('', 'Escolha o elemento'), *Ficha.ELEMENTOS_CICATRIZADO),
+        required=False,
+    )
+    cicatrizado_perigo = forms.CharField(
+        label='Perigo específico de Cicatrizado',
+        max_length=120,
+        required=False,
+    )
+
+    GRAUS_TREINAMENTO = (
+        ('treinado', 'Treinado'),
+        ('veterano', 'Veterano'),
+        ('expert', 'Expert'),
+    )
+
+    def __init__(
+        self, *args, mesa, classe, origem, atributos, pericia_ids, livre=False, **kwargs,
+    ):
+        self.mesa = mesa
+        self.classe = classe
+        self.origem = origem
+        self.atributos = atributos
+        self.livre = livre
+        super().__init__(*args, **kwargs)
+        if livre:
+            self.fields['confirmar'].required = False
+
+        pericias = Pericia.objects.in_bulk(pericia_ids)
+        self.pericias = pericias
+        if classe:
+            self.fields['trilha'].queryset = Trilha.objects.filter(
+                classe_id=classe.pk,
+            ).order_by('nome')
+        self.fields['patente_inicial'].queryset = Patente.objects.order_by(
+            'limite_pd', 'pontos_prestigio', 'nome',
+        )
+
+        sobrevivente = bool(classe and classe.slug == 'sobrevivente')
+        progressao = mesa.sistema_progressao
+        if not classe:
+            self.fields.pop('trilha')
+        if sobrevivente:
+            for campo in (
+                'nex_inicial', 'nivel_inicial', 'nex_paranormal', 'patente_inicial',
+            ):
+                self.fields.pop(campo)
+            self.fields['estagio_inicial'].choices = [
+                (str(estagio), f'Estágio {estagio}') for estagio in range(1, 6)
+            ]
+            self.fields['estagio_inicial'].initial = '1'
+            self.fields['cicatrizado_elemento'].help_text = (
+                'Opcional no estágio 5; pode ser escolhido mais tarde pela ficha.'
+            )
+        elif not classe:
+            self.fields.pop('nex_inicial')
+            self.fields.pop('nivel_inicial')
+            self.fields.pop('nex_paranormal')
+            self.fields.pop('estagio_inicial')
+            if progressao != 'patentes':
+                self.fields.pop('patente_inicial')
+            self.fields.pop('cicatrizado_elemento')
+            self.fields.pop('cicatrizado_perigo')
+        elif progressao == 'nex':
+            self.fields.pop('nivel_inicial')
+            self.fields.pop('nex_paranormal')
+            self.fields.pop('estagio_inicial')
+            self.fields.pop('patente_inicial')
+            self.fields.pop('cicatrizado_elemento')
+            self.fields.pop('cicatrizado_perigo')
+            self.fields['nex_inicial'].choices = [(str(nex), f'{nex}%') for nex in NEX_VALIDOS]
+            self.fields['nex_inicial'].initial = '5'
+        elif progressao == 'nivel_nex':
+            self.fields.pop('nex_inicial')
+            self.fields.pop('estagio_inicial')
+            self.fields.pop('patente_inicial')
+            self.fields.pop('cicatrizado_elemento')
+            self.fields.pop('cicatrizado_perigo')
+            self.fields['nivel_inicial'].choices = [
+                (str(nivel), str(nivel)) for nivel in range(1, 21)
+            ]
+            self.fields['nivel_inicial'].initial = '1'
+            self.fields['nex_paranormal'].choices = [
+                (str(nex), f'{nex}%') for nex in range(100)
+            ]
+            self.fields['nex_paranormal'].initial = '0'
+        else:
+            self.fields.pop('nex_inicial')
+            self.fields.pop('nivel_inicial')
+            self.fields.pop('nex_paranormal')
+            self.fields.pop('estagio_inicial')
+            self.fields.pop('cicatrizado_elemento')
+            self.fields.pop('cicatrizado_perigo')
+            self.fields['patente_inicial'].required = True
+            recruta = Patente.objects.filter(slug='recruta').first()
+            if recruta:
+                self.fields['patente_inicial'].initial = recruta.pk
+
+        if progressao == 'patentes' and 'patente_inicial' in self.fields:
+            recruta = Patente.objects.filter(slug='recruta').first()
+            if recruta:
+                self.fields['patente_inicial'].initial = recruta.pk
+
+        if 'nex_inicial' in self.fields:
+            self.fields['nex_inicial'].required = True
+        if 'nivel_inicial' in self.fields:
+            self.fields['nivel_inicial'].required = True
+            self.fields['nex_paranormal'].required = True
+        if 'estagio_inicial' in self.fields:
+            self.fields['estagio_inicial'].required = True
+        if 'patente_inicial' in self.fields:
+            self.fields['patente_inicial'].required = progressao == 'patentes'
+
+        for pericia in pericias.values():
+            self.fields[f'grau_pericia_{pericia.pk}'] = forms.ChoiceField(
+                label=f'Treinamento em {pericia.nome}',
+                choices=self.GRAUS_TREINAMENTO,
+                initial='treinado',
+            )
+
+    def clean(self):
+        dados = super().clean()
+        trilha = dados.get('trilha')
+        if trilha and self.classe:
+            if trilha.classe_id != self.classe.pk:
+                self.add_error('trilha', 'A trilha não pertence à classe escolhida.')
+            else:
+                patente = dados.get('patente_inicial')
+                nivel = (
+                    int(dados['nivel_inicial'])
+                    if dados.get('nivel_inicial') else None
+                )
+                nex = (
+                    int(dados['nex_inicial'])
+                    if dados.get('nex_inicial') else None
+                )
+                if self.mesa.sistema_progressao == 'nivel_nex' and nivel:
+                    nex = nex_equivalente_por_nivel(nivel)
+                elif patente:
+                    nex = nex_equivalente_por_nivel(max(1, patente.limite_pd))
+                pericias_treinadas = {
+                    pericia.slug for pericia in self.pericias.values()
+                }
+                if self.origem:
+                    pericias_treinadas.update(
+                        self.origem.pericias_treinadas.values_list('slug', flat=True)
+                    )
+                if not trilha_atende_pre_requisitos(
+                    trilha,
+                    classe=self.classe,
+                    nex=nex,
+                    nivel_experiencia=nivel,
+                    estagio=int(dados['estagio_inicial'])
+                    if dados.get('estagio_inicial') else None,
+                    patente=patente,
+                    atributos=self.atributos,
+                    pericias_treinadas=pericias_treinadas,
+                ):
+                    self.add_error(
+                        'trilha',
+                        'A ficha ainda não atende aos pré-requisitos desta trilha.',
+                    )
+
+        if not self.livre and self.classe:
+            if self.classe.slug == 'sobrevivente':
+                aprimoramentos_disponiveis = 0
+            else:
+                if self.mesa.sistema_progressao == 'nex':
+                    nex_efetivo = int(dados.get('nex_inicial') or 5)
+                elif self.mesa.sistema_progressao == 'nivel_nex':
+                    nex_efetivo = nex_equivalente_por_nivel(
+                        int(dados.get('nivel_inicial') or 1),
+                    )
+                else:
+                    patente = dados.get('patente_inicial')
+                    nex_efetivo = nex_equivalente_por_nivel(
+                        max(1, patente.limite_pd) if patente else 1,
+                    )
+                pericias_por_marco = {
+                    'combatente': 2,
+                    'especialista': 5,
+                    'ocultista': 3,
+                }.get(self.classe.slug, 0)
+                aprimoramentos_disponiveis = (
+                    pericias_por_marco + int(self.atributos.get('intelecto', 1))
+                ) * (
+                    int(nex_efetivo >= 35) + int(nex_efetivo >= 70)
+                )
+            graus = {'treinado': 0, 'veterano': 1, 'expert': 2}
+            total_aprimoramentos = sum(
+                graus.get(dados.get(f'grau_pericia_{pk}', 'treinado'), 0)
+                for pk in self.pericias
+            )
+            if total_aprimoramentos > aprimoramentos_disponiveis:
+                self.add_error(
+                    None,
+                    'Os graus escolhidos excedem os aprimoramentos de perícia '
+                    'disponíveis nesta progressão.',
+                )
+
+        if dados.get('cicatrizado_elemento') and not dados.get('cicatrizado_perigo'):
+            self.add_error('cicatrizado_perigo', 'Informe o perigo paranormal enfrentado.')
+        if dados.get('cicatrizado_perigo') and not dados.get('cicatrizado_elemento'):
+            self.add_error('cicatrizado_elemento', 'Escolha o elemento do perigo.')
+        if self.classe and self.classe.slug == 'sobrevivente':
+            if (
+                dados.get('estagio_inicial') == '5'
+                and bool(dados.get('cicatrizado_elemento'))
+                != bool(dados.get('cicatrizado_perigo'))
+            ):
+                self.add_error(
+                    None, 'No estágio 5, informe o elemento e o perigo de Cicatrizado.',
+                )
+        return dados
+
+
 class RevisaoFichaForm(forms.Form):
     confirmar = forms.BooleanField(label='Confirmo os dados da ficha', required=True)
 
@@ -175,6 +422,15 @@ class RevisaoFichaForm(forms.Form):
         super().__init__(*args, **kwargs)
         if livre:
             self.fields['confirmar'].required = False
+
+
+class HabilidadeFichaForm(forms.ModelForm):
+    class Meta:
+        model = HabilidadeFicha
+        fields = ('nome', 'descricao')
+        widgets = {
+            'descricao': forms.Textarea(attrs={'rows': 3}),
+        }
 
 
 class FichaEdicaoForm(forms.Form):
@@ -446,16 +702,7 @@ class ConfiguracaoMesaForm(forms.Form):
         super().__init__(*args, **kwargs)
 
     def clean_sistema_progressao(self):
-        sistema = self.cleaned_data['sistema_progressao']
-        if (
-            self.sistema_progressao_atual
-            and sistema != self.sistema_progressao_atual
-            and Ficha.objects.exists()
-        ):
-            raise ValidationError(
-                'Não é possível trocar a progressão depois que fichas foram criadas.'
-            )
-        return sistema
+        return self.cleaned_data['sistema_progressao']
 
     def clean(self):
         dados = super().clean()

@@ -100,5 +100,7 @@
         }
     }
 
-    window.setInterval(atualizarPainel, 5000);
+    if (painel.dataset.pollEnabled === 'true') {
+        window.setInterval(atualizarPainel, 5000);
+    }
 })();

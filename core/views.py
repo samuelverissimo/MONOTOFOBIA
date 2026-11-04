@@ -1,15 +1,32 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 from django_ratelimit.decorators import ratelimit
 
-from .forms import AmeacaMesaForm, CenaMesaForm, PistaCenaForm
-from .models import AmeacaMesa, CenaMesa, PistaCena, RegistroAmeaca, RegistroCena
+from .forms import (
+    AmeacaMesaForm,
+    CenaMesaForm,
+    InscreverFichaMesaForm,
+    MesaForm,
+    PistaCenaForm,
+)
+from .models import (
+    AmeacaMesa,
+    CenaMesa,
+    InscricaoMesa,
+    Mesa,
+    PistaCena,
+    RegistroAmeaca,
+    RegistroCena,
+)
+from fichas.forms import ConfiguracaoMesaForm
 from fichas.models import Condicao, ConfiguracaoMesa, Ficha, FichaCondicao, LogAlteracao, Rolagem
 from fichas.permissions import fichas_visiveis_para, is_mestre
 
@@ -17,7 +34,124 @@ from fichas.permissions import fichas_visiveis_para, is_mestre
 # Views privadas novas devem usar @login_required ou LoginRequiredMixin.
 @login_required
 def home(request):
-    return render(request, 'home.html', {'fichas': fichas_visiveis_para(request.user)})
+    return render(request, 'home.html', {
+        'fichas': fichas_visiveis_para(request.user).prefetch_related('mesas'),
+        'mestre': is_mestre(request.user),
+    })
+
+
+@login_required
+def lista_mesas(request):
+    mestre = is_mestre(request.user)
+    if mestre:
+        return redirect(f'{reverse("painel_mestre")}#mesas')
+    mesas_publicas = list(Mesa.objects.filter(publica=True).order_by('nome', 'pk'))
+    mesas_inscritas = list(
+        Mesa.objects.filter(inscricoes__ficha__dono=request.user).distinct().order_by('nome', 'pk')
+    )
+    mesas_do_mestre = list(
+        Mesa.objects.filter(mestre=request.user).order_by('nome', 'pk')
+    ) if mestre else []
+    mesas_visiveis = list(dict.fromkeys(mesas_publicas + mesas_inscritas + mesas_do_mestre))
+    for mesa in mesas_visiveis:
+        mesa.inscricoes_visiveis = list(
+            mesa.inscricoes.select_related('ficha__dono').order_by('inscrita_em', 'pk')
+        )
+    return render(request, 'core/mesas.html', {
+        'mestre': mestre,
+        'mesas_publicas': mesas_publicas,
+        'mesas_inscritas': {mesa.pk for mesa in mesas_inscritas},
+        'mesas_do_mestre': mesas_do_mestre,
+        'mesas_visiveis': mesas_visiveis,
+        'fichas_disponiveis': request.user.fichas.filter(status='ativa').order_by('nome', 'pk'),
+        'formulario_inscricao': InscreverFichaMesaForm(user=request.user),
+    })
+
+
+@login_required
+@require_POST
+@ratelimit(key='user', rate='10/h', method='POST', block=True)
+def criar_mesa(request):
+    if not is_mestre(request.user):
+        raise PermissionDenied
+    form = MesaForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, 'Não foi possível criar a mesa. Confira o nome e a visibilidade.')
+        return redirect(f'{reverse("painel_mestre")}#mesas')
+    mesa = form.save(commit=False)
+    mesa.mestre = request.user
+    mesa.save()
+    if mesa.publica:
+        messages.success(request, f'Mesa pública “{mesa.nome}” criada.')
+    else:
+        messages.success(
+            request,
+            f'Mesa privada “{mesa.nome}” criada. Código de acesso: {mesa.codigo_acesso}.',
+        )
+    return redirect(f'{reverse("painel_mestre")}#mesas')
+
+
+@login_required
+@require_POST
+@ratelimit(key='user', rate='10/h', method='POST', block=True)
+def inscrever_ficha_mesa(request):
+    form = InscreverFichaMesaForm(request.POST, user=request.user)
+    if not form.is_valid():
+        erros = ' '.join(
+            str(erro)
+            for campo_erros in form.errors.values()
+            for erro in campo_erros
+        )
+        messages.error(request, f'Não foi possível inscrever a ficha: {erros}')
+        return redirect('lista_mesas')
+
+    dados = form.cleaned_data
+    if dados['mesa']:
+        mesa = dados['mesa']
+    else:
+        mesa = Mesa.objects.filter(
+            publica=False, codigo_acesso=dados['codigo_acesso'],
+        ).first()
+        if mesa is None:
+            messages.error(request, 'Código de mesa privada inválido.')
+            return redirect('lista_mesas')
+
+    ficha = dados['ficha']
+    with transaction.atomic():
+        if InscricaoMesa.objects.select_for_update().filter(mesa=mesa, ficha=ficha).exists():
+            messages.error(request, 'Esta ficha já está inscrita nessa mesa.')
+            return redirect('lista_mesas')
+        InscricaoMesa.objects.create(mesa=mesa, ficha=ficha)
+    messages.success(request, f'Ficha “{ficha.nome}” inscrita na mesa “{mesa.nome}”.')
+    return redirect('lista_mesas')
+
+
+@login_required
+@require_POST
+@ratelimit(key='user', rate='30/h', method='POST', block=True)
+def remover_inscricao_mesa(request, mesa_pk, ficha_pk):
+    mesa = get_object_or_404(Mesa, pk=mesa_pk)
+    inscricoes = InscricaoMesa.objects.filter(mesa=mesa, ficha_id=ficha_pk)
+    if not is_mestre(request.user) or mesa.mestre_id != request.user.pk:
+        inscricoes = inscricoes.filter(ficha__dono=request.user)
+    inscricao = get_object_or_404(inscricoes.select_related('ficha'))
+    nome_ficha = inscricao.ficha.nome
+    inscricao.delete()
+    messages.success(request, f'Ficha “{nome_ficha}” removida da mesa “{mesa.nome}”.')
+    if is_mestre(request.user) and mesa.mestre_id == request.user.pk:
+        return redirect(f'{reverse("painel_mestre")}#mesas')
+    return redirect('lista_mesas')
+
+
+@login_required
+@require_POST
+@ratelimit(key='user', rate='10/h', method='POST', block=True)
+def excluir_mesa(request, pk):
+    mesa = get_object_or_404(Mesa, pk=pk, mestre=request.user)
+    nome = mesa.nome
+    mesa.delete()
+    messages.success(request, f'Mesa “{nome}” excluída. As fichas não foram apagadas.')
+    return redirect(f'{reverse("painel_mestre")}#mesas')
 
 
 @require_GET
@@ -34,27 +168,78 @@ def service_worker(request):
 def painel_mestre(request):
     if not is_mestre(request.user):
         raise PermissionDenied
-    fichas = Ficha.objects.select_related('dono', 'classe').order_by('status', 'nome', 'pk')
-    contagens_status = _contagens_status()
-    rolagens = list(Rolagem.objects.select_related(
+    return contexto_painel_mestre(request)
+
+
+def contexto_painel_mestre(
+    request, *, formulario_configuracao=None, formulario_cena=None, status=200,
+):
+    if not is_mestre(request.user):
+        raise PermissionDenied
+    fichas = Ficha.objects.select_related(
+        'dono', 'classe', 'patente',
+    ).order_by('status', 'nome', 'pk')
+    filtro_rolagem = request.GET.get('ficha', '')
+    rolagens_queryset = Rolagem.objects.select_related(
         'ficha', 'usuario',
-    ).order_by('-criada_em', '-pk')[:25])
-    status_counts = {
-        item['rotulo']: item['total']
-        for item in contagens_status
-    }
+    ).order_by('-criada_em', '-pk')
+    if filtro_rolagem:
+        if not filtro_rolagem.isdecimal():
+            return render(request, '404.html', status=404)
+        rolagens_queryset = rolagens_queryset.filter(ficha_id=int(filtro_rolagem))
+    pagina_rolagens = Paginator(rolagens_queryset, 50).get_page(
+        request.GET.get('pagina'),
+    )
+    rolagens = list(pagina_rolagens.object_list)
+    parametros = request.GET.copy()
+    parametros.pop('pagina', None)
+    url_anterior = ''
+    url_proxima = ''
+    if pagina_rolagens.has_previous():
+        parametros['pagina'] = pagina_rolagens.previous_page_number()
+        url_anterior = f'{reverse("painel_mestre")}?{parametros.urlencode()}#historico'
+    if pagina_rolagens.has_next():
+        parametros['pagina'] = pagina_rolagens.next_page_number()
+        url_proxima = f'{reverse("painel_mestre")}?{parametros.urlencode()}#historico'
+    mesa = ConfiguracaoMesa.objects.filter(pk=1).first() or ConfiguracaoMesa()
+    if formulario_configuracao is None:
+        formulario_configuracao = ConfiguracaoMesaForm(initial={
+            'modo_recursos': mesa.modo_recursos,
+            'sistema_progressao': mesa.sistema_progressao,
+            'jogador_pode_subir_nex': mesa.jogador_pode_subir_nex,
+            'ferimentos_debilitantes': mesa.ferimentos_debilitantes,
+            'max_fichas_ativas': mesa.max_fichas_ativas,
+        })
     return render(request, 'core/painel_mestre.html', {
         'fichas': fichas,
-        'fichas_ativas': Ficha.objects.filter(status='ativa').order_by('nome', 'pk'),
         'condicoes': Condicao.objects.order_by('categoria', 'nome'),
-        'contagens_status': contagens_status,
+        'contagens_status': _contagens_status(),
         'rolagens_recentes': rolagens,
-        'cursor_rolagens': max((rolagem.pk for rolagem in rolagens), default=0),
-        'numero_sessao': (
-            ConfiguracaoMesa.objects.filter(pk=1).values_list('numero_sessao', flat=True).first()
-            or 1
+        'rolagens_paginadas': pagina_rolagens,
+        'filtro_rolagem': filtro_rolagem,
+        'url_anterior_rolagens': url_anterior,
+        'url_proxima_rolagens': url_proxima,
+        'poll_rolagens': pagina_rolagens.number == 1 and not filtro_rolagem,
+        'cursor_rolagens': Rolagem.objects.order_by('-pk').values_list(
+            'pk', flat=True,
+        ).first() or 0,
+        'numero_sessao': mesa.numero_sessao,
+        'formulario_configuracao': formulario_configuracao,
+        'formulario_mesa': MesaForm(),
+        'mesas_mestre': Mesa.objects.filter(mestre=request.user).prefetch_related(
+            'inscricoes__ficha__dono',
         ),
-    })
+        'cenas_mestre': _cenas_para_painel(),
+        'formulario_cena': formulario_cena or CenaMesaForm(),
+    }, status=status)
+
+
+def _cenas_para_painel():
+    cenas = list(CenaMesa.objects.prefetch_related('pistas'))
+    for cena in cenas:
+        cena.formulario_pista = PistaCenaForm()
+        cena.estados_pista = PistaCena.ESTADOS
+    return cenas
 
 
 def _contagens_status():
@@ -160,6 +345,8 @@ def aplicar_condicao_em_grupo(request):
 @login_required
 def lista_cenas(request):
     mestre = is_mestre(request.user)
+    if mestre:
+        return redirect(f'{reverse("painel_mestre")}#cenas')
     cenas = CenaMesa.objects.all() if mestre else CenaMesa.objects.filter(ativa=True)
     return render(request, 'core/cenas.html', {
         'cenas': cenas,
@@ -191,18 +378,14 @@ def criar_cena(request):
         raise PermissionDenied
     form = CenaMesaForm(request.POST)
     if not form.is_valid():
-        return render(request, 'core/cenas.html', {
-            'cenas': CenaMesa.objects.all(),
-            'mestre': True,
-            'formulario_cena': form,
-        }, status=400)
+        return contexto_painel_mestre(request, formulario_cena=form, status=400)
     with transaction.atomic():
         cena = form.save(commit=False)
         cena.criado_por = request.user
         cena.save()
         RegistroCena.objects.create(cena=cena, usuario=request.user, acao='criada')
     messages.success(request, 'Cena criada. Ela só aparece aos jogadores quando for ativada.')
-    return redirect('detalhe_cena', pk=cena.pk)
+    return redirect(f'{reverse("painel_mestre")}#cenas')
 
 
 @login_required
@@ -214,7 +397,7 @@ def alterar_estado_cena(request, pk):
     ativo = request.POST.get('ativa')
     if ativo not in {'0', '1'}:
         messages.error(request, 'Estado de publicação inválido.')
-        return redirect('detalhe_cena', pk=pk)
+        return redirect(f'{reverse("painel_mestre")}#cenas')
     with transaction.atomic():
         cena = get_object_or_404(CenaMesa.objects.select_for_update(), pk=pk)
         cena.ativa = ativo == '1'
@@ -223,7 +406,7 @@ def alterar_estado_cena(request, pk):
             cena=cena, usuario=request.user, acao='publicada' if cena.ativa else 'ocultada',
         )
     messages.success(request, 'Cena visível aos jogadores.' if cena.ativa else 'Cena ocultada dos jogadores.')
-    return redirect('detalhe_cena', pk=pk)
+    return redirect(f'{reverse("painel_mestre")}#cenas')
 
 
 @login_required
@@ -236,7 +419,7 @@ def adicionar_pista(request, pk):
     cena = get_object_or_404(CenaMesa, pk=pk)
     if not form.is_valid():
         messages.error(request, 'Confira o título e o conteúdo da pista.')
-        return redirect('detalhe_cena', pk=pk)
+        return redirect(f'{reverse("painel_mestre")}#cenas')
     with transaction.atomic():
         pista = form.save(commit=False)
         pista.cena = cena
@@ -245,7 +428,7 @@ def adicionar_pista(request, pk):
             cena=cena, usuario=request.user, acao=f'pista_criada:{pista.pk}',
         )
     messages.success(request, 'Pista registrada e mantida oculta até ser revelada.')
-    return redirect('detalhe_cena', pk=pk)
+    return redirect(f'{reverse("painel_mestre")}#cenas')
 
 
 @login_required
@@ -257,7 +440,7 @@ def alterar_estado_pista(request, pk, pista_pk):
     estado = request.POST.get('estado')
     if estado not in {'oculta', 'revelada', 'anotada'}:
         messages.error(request, 'Estado de pista inválido.')
-        return redirect('detalhe_cena', pk=pk)
+        return redirect(f'{reverse("painel_mestre")}#cenas')
     with transaction.atomic():
         cena = get_object_or_404(CenaMesa.objects.select_for_update(), pk=pk)
         pista = get_object_or_404(
@@ -269,7 +452,7 @@ def alterar_estado_pista(request, pk, pista_pk):
             cena=cena, usuario=request.user, acao=f'pista_{estado}:{pista.pk}',
         )
     messages.success(request, 'Estado da pista atualizado.')
-    return redirect('detalhe_cena', pk=pk)
+    return redirect(f'{reverse("painel_mestre")}#cenas')
 
 
 @login_required

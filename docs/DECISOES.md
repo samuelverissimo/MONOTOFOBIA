@@ -46,7 +46,7 @@
 - `db.sqlite3`, `.env`, arquivos de log, PDFs dentro de `docs/`, textos extraídos e `docs/ARQUIVOS SECRETOS/` permanecem ignorados pelo Git. `.gitattributes` normaliza finais de linha para LF.
 - O `requirements-dev.txt` contém dependências de runtime e ferramentas de desenvolvimento. PyMuPDF, usado apenas por `tools/extrair_pdf.py`, fica em `requirements-pdf.txt`; a CI não instala as dependências de PDF ou pre-commit.
 - Fichas arquivadas, mortas ou aposentadas são somente leitura para o dono nos fluxos de recurso, condição, rolagem, inventário, avanço de NEX e edição. O mestre pode alterá-las; arquivar/restaurar continua sendo uma operação de status própria.
-- Dano e cura de PV são limitados ao recurso disponível e ao máximo. PV temporários absorvem dano antes dos PV; o endpoint informa a quantidade aplicada e o excedente, e registra cada recurso efetivamente alterado em `LogAlteracao`.
+- Dano de PV é limitado ao recurso disponível. O excedente acima do máximo é parte do valor do próprio recurso e absorve dano primeiro; o endpoint informa aplicado/excedente e audita cada recurso alterado em `LogAlteracao`.
 - O token CSRF é exposto no meta tag da página para o JavaScript próprio, sem tornar o cookie CSRF legível por JavaScript (`CSRF_COOKIE_HTTPONLY=True`). HSTS preload permanece desativado enquanto o tempo de HSTS for inferior a um ano.
 - As escritas solicitadas em inventário, status, avanço de NEX, edição e configuração da mesa têm rate limit por usuário. A CI também verifica alterações de migração e executa `check --deploy` com configuração de produção simulada.
 - O polling do painel do mestre é de 5 segundos e limitado a 120 consultas por minuto por usuário. A alteração de condições em grupo aceita até 50 fichas ativas, sob transação e com uma entrada de auditoria por ficha.
@@ -75,7 +75,7 @@
 ## Ferimentos Debilitantes
 
 - SaH p. 105 descreve um ferimento após falha em Fortitude contra dano massivo, com −1 dado em testes baseados no atributo afetado; um ferimento em Vigor reduz PV máximos em um ponto por cada NEX de 5% ou nível de experiência. A recuperação exige Medicina DT 20 e dormir.
-- A mesa pode ativar a regra; o mestre registra o atributo resultante, confirma o sucesso físico do teste de Medicina e registra a recuperação após dormir. Ferimentos ativos penalizam dados no servidor; ferimentos de Vigor reduzem PV máximos e, se isso deixar PV atual acima do máximo, o valor atual é limitado com auditoria. O máximo de personagem que usa apenas estágios (Sobrevivente) não recebe esta redução, pois o texto consultado não define a conversão de estágio para NEX/nível.
+- A mesa pode ativar a regra; o mestre registra o atributo resultante, confirma o sucesso físico do teste de Medicina e registra a recuperação após dormir. Ferimentos ativos penalizam dados no servidor; ferimentos de Vigor reduzem PV máximos sem descartar o excedente atual, que passa a ser temporário. O máximo de personagem que usa apenas estágios (Sobrevivente) não recebe esta redução, pois o texto consultado não define a conversão de estágio para NEX/nível.
 - O teste de dano massivo não é detectado automaticamente pelo rastreador de combate: o gatilho precisa ser avaliado fisicamente e registrado pelo mestre, sem inferência pela aplicação.
 
 ## Nível de Experiência e Nível de Exposição

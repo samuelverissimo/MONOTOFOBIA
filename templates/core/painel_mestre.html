@@ -3,23 +3,28 @@
 {% block title %}Painel do mestre | MONOTOFOBIA{% endblock %}
 
 {% block content %}
-<div class="page" data-master-dashboard
+<div class="page master-dashboard" data-master-dashboard
     data-poll-url="{% url 'painel_mestre_atualizacoes' %}"
-    data-roll-cursor="{{ cursor_rolagens }}">
+    data-roll-cursor="{{ cursor_rolagens }}"
+    data-poll-enabled="{{ poll_rolagens|yesno:'true,false' }}">
     <header class="topbar">
         <a href="{% url 'home' %}">Voltar às fichas</a>
-        <nav aria-label="Ações do mestre">
-            <a href="{% url 'fichas:configurar_mesa' %}">Configurar mesa</a>
+        <nav aria-label="Seções do painel do mestre">
+            <a href="#mesas">Mesas</a>
+            <a href="#cenas">Cenas</a>
+            <a href="#historico">Rolagens</a>
+            <a href="#configuracao">Configuração</a>
             <a href="{% url 'fichas:encontros_combate' %}">Combates</a>
-            <a href="{% url 'lista_cenas' %}">Cenas da mesa</a>
             <a href="{% url 'lista_ameacas' %}">Bestiário</a>
         </nav>
     </header>
     <main>
         <h1>Painel do mestre</h1>
-        <section aria-labelledby="session-control-heading">
-            <h2 id="session-control-heading">Sessão {{ numero_sessao }}</h2>
-            <p>Iniciar uma nova sessão renova habilidades limitadas a uma vez por sessão.</p>
+        <section class="master-session" aria-labelledby="session-control-heading">
+            <div>
+                <h2 id="session-control-heading">Sessão {{ numero_sessao }}</h2>
+                <p>Iniciar uma nova sessão renova habilidades limitadas a uma vez por sessão.</p>
+            </div>
             <form method="post" action="{% url 'iniciar_nova_sessao' %}">
                 {% csrf_token %}
                 <button class="button button-secondary" type="submit">Iniciar nova sessão</button>
@@ -35,8 +40,58 @@
                 {% endfor %}
             </ul>
         </section>
-        <section aria-labelledby="all-sheets-heading">
-            <h2 id="all-sheets-heading">Fichas da mesa</h2>
+        <section id="mesas" aria-labelledby="tables-heading">
+            <h2 id="tables-heading">Mesas e inscrições</h2>
+            <div class="master-management-grid">
+                <form class="master-create-form" method="post" action="{% url 'criar_mesa' %}">
+                    {% csrf_token %}
+                    <h3>Criar mesa</h3>
+                    {{ formulario_mesa.as_p }}
+                    <button class="button" type="submit">Criar mesa</button>
+                </form>
+                <div class="master-table-list">
+                    {% for mesa in mesas_mestre %}
+                        <article class="table-card">
+                            <div class="table-card-heading">
+                                <div>
+                                    <h3>{{ mesa.nome }}</h3>
+                                    <p class="muted">{% if mesa.publica %}Pública{% else %}Privada{% endif %}</p>
+                                </div>
+                                {% if not mesa.publica %}
+                                    <p class="table-access-code">Código <strong>{{ mesa.codigo_acesso }}</strong></p>
+                                {% endif %}
+                            </div>
+                            <h4>Fichas inscritas</h4>
+                            <ul class="table-roster">
+                                {% for inscricao in mesa.inscricoes.all %}
+                                    <li>
+                                        <a href="{% url 'fichas:detalhe' inscricao.ficha.pk %}">
+                                            {{ inscricao.ficha.nome }} · {{ inscricao.ficha.dono.username }}
+                                        </a>
+                                        <form method="post" action="{% url 'remover_inscricao_mesa' mesa.pk inscricao.ficha.pk %}">
+                                            {% csrf_token %}
+                                            <button class="button button-secondary" type="submit">Remover</button>
+                                        </form>
+                                    </li>
+                                {% empty %}
+                                    <li>Nenhuma ficha inscrita.</li>
+                                {% endfor %}
+                            </ul>
+                            <details class="delete-confirm">
+                                <summary>Excluir mesa</summary>
+                                <p>As inscrições serão removidas, mas as fichas continuarão salvas.</p>
+                                <form method="post" action="{% url 'excluir_mesa' mesa.pk %}">
+                                    {% csrf_token %}
+                                    <button class="button button-secondary" type="submit">Confirmar exclusão</button>
+                                </form>
+                            </details>
+                        </article>
+                    {% empty %}
+                        <p>Nenhuma mesa criada. Mesas criadas aparecerão aqui para gerenciamento.</p>
+                    {% endfor %}
+                </div>
+            </div>
+            <h3>Fichas cadastradas</h3>
             <form method="post" action="{% url 'aplicar_condicao_grupo' %}">
                 {% csrf_token %}
                 <label for="group-condition">Aplicar condição a fichas ativas</label>
@@ -51,7 +106,7 @@
                     {% for ficha in fichas %}
                         <li data-master-sheet="{{ ficha.pk }}">
                             {% if ficha.status == 'ativa' %}
-                                <label><input type="checkbox" name="fichas" value="{{ ficha.pk }}"> Selecionar</label>
+                                <label class="checklist-control"><input type="checkbox" name="fichas" value="{{ ficha.pk }}"> Selecionar</label>
                             {% endif %}
                             <a href="{% url 'fichas:detalhe' ficha.pk %}">{{ ficha.nome }}</a>
                             <span>{{ ficha.dono.username }} · {{ ficha.classe|default:'Sem classe' }} · {{ ficha.get_status_display }}</span>
@@ -63,8 +118,84 @@
                 <button class="button button-secondary" type="submit">Aplicar condição selecionada</button>
             </form>
         </section>
-        <section aria-labelledby="recent-rolls-heading">
-            <h2 id="recent-rolls-heading">Rolagens recentes</h2>
+        <section id="cenas" aria-labelledby="scenes-heading">
+            <h2 id="scenes-heading">Cenas da mesa</h2>
+            <div class="master-management-grid">
+                <form class="master-create-form" method="post" action="{% url 'criar_cena' %}">
+                    {% csrf_token %}
+                    <h3>Criar cena</h3>
+                    <p class="muted">As cenas começam ocultas. Ative-as para revelar a descrição pública e as pistas liberadas.</p>
+                    {{ formulario_cena.as_p }}
+                    <button class="button" type="submit">Criar cena</button>
+                </form>
+                <div class="master-scene-list">
+                    {% for cena in cenas_mestre %}
+                        <article class="table-card">
+                            <div class="table-card-heading">
+                                <div>
+                                    <h3><a href="{% url 'detalhe_cena' cena.pk %}">{{ cena.nome }}</a></h3>
+                                    <p class="muted">{{ cena.get_tipo_display }} · {% if cena.ativa %}Visível aos jogadores{% else %}Oculta{% endif %}</p>
+                                </div>
+                                <form method="post" action="{% url 'alterar_estado_cena' cena.pk %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="ativa" value="{% if cena.ativa %}0{% else %}1{% endif %}">
+                                    <button class="button button-secondary" type="submit">{% if cena.ativa %}Ocultar{% else %}Revelar{% endif %}</button>
+                                </form>
+                            </div>
+                            <p>{{ cena.descricao_jogadores|default:'Sem descrição pública.' }}</p>
+                            {% if cena.anotacoes_mestre %}<p class="muted">Nota do mestre: {{ cena.anotacoes_mestre }}</p>{% endif %}
+                            <h4>Pistas</h4>
+                            <ul class="scene-clue-list">
+                                {% for pista in cena.pistas.all %}
+                                    <li>
+                                        <div>
+                                            <strong>{{ pista.titulo }}</strong>
+                                            <p>{{ pista.conteudo }}</p>
+                                            <span class="muted">{{ pista.get_estado_display }}</span>
+                                        </div>
+                                        <form method="post" action="{% url 'alterar_estado_pista' cena.pk pista.pk %}">
+                                            {% csrf_token %}
+                                            <label for="clue-state-{{ pista.pk }}">Visibilidade</label>
+                                            <select id="clue-state-{{ pista.pk }}" name="estado">
+                                                {% for estado, rotulo in cena.estados_pista %}
+                                                    <option value="{{ estado }}"{% if pista.estado == estado %} selected{% endif %}>{{ rotulo }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <button class="button button-secondary" type="submit">Atualizar pista</button>
+                                        </form>
+                                    </li>
+                                {% empty %}
+                                    <li>Nenhuma pista cadastrada.</li>
+                                {% endfor %}
+                            </ul>
+                            <form class="scene-clue-form" method="post" action="{% url 'adicionar_pista' cena.pk %}">
+                                {% csrf_token %}
+                                <h4>Adicionar pista oculta</h4>
+                                {{ cena.formulario_pista.as_p }}
+                                <button class="button button-secondary" type="submit">Adicionar pista</button>
+                            </form>
+                            <a href="{% url 'detalhe_cena' cena.pk %}">Abrir visualização completa</a>
+                        </article>
+                    {% empty %}
+                        <p>Nenhuma cena cadastrada.</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
+        <section id="historico" aria-labelledby="recent-rolls-heading">
+            <h2 id="recent-rolls-heading">Histórico de rolagens</h2>
+            <form class="master-history-filter" method="get" action="{% url 'painel_mestre' %}#historico">
+                <label for="roll-sheet-filter">Filtrar por ficha</label>
+                <select id="roll-sheet-filter" name="ficha">
+                    <option value="">Todas as fichas</option>
+                    {% for ficha in fichas %}
+                        <option value="{{ ficha.pk }}"{% if filtro_rolagem == ficha.pk|stringformat:'s' %} selected{% endif %}>
+                            {{ ficha.nome }} · {{ ficha.dono.username }}
+                        </option>
+                    {% endfor %}
+                </select>
+                <button class="button button-secondary" type="submit">Filtrar</button>
+            </form>
             <ol class="master-roll-list" data-master-roll-list>
                 {% for rolagem in rolagens_recentes %}
                     <li data-master-roll="{{ rolagem.pk }}">
@@ -75,6 +206,22 @@
                     <li data-empty-rolls>Nenhuma rolagem registrada.</li>
                 {% endfor %}
             </ol>
+            {% if rolagens_paginadas.has_previous or rolagens_paginadas.has_next %}
+                <nav class="pagination" aria-label="Paginação do histórico de rolagens">
+                    {% if url_anterior_rolagens %}<a class="button button-secondary" href="{{ url_anterior_rolagens }}">Mais recentes</a>{% endif %}
+                    <span>Página {{ rolagens_paginadas.number }} de {{ rolagens_paginadas.paginator.num_pages }}</span>
+                    {% if url_proxima_rolagens %}<a class="button button-secondary" href="{{ url_proxima_rolagens }}">Mais antigas</a>{% endif %}
+                </nav>
+            {% endif %}
+        </section>
+        <section id="configuracao" aria-labelledby="table-settings-heading">
+            <h2 id="table-settings-heading">Configuração da mesa</h2>
+            <p>Ao trocar a progressão, as fichas existentes serão convertidas para o equivalente mais próximo. Recursos atuais serão ajustados aos novos máximos, sem apagar os valores que estiverem dentro dos limites.</p>
+            <form method="post" action="{% url 'fichas:configurar_mesa' %}">
+                {% csrf_token %}
+                {{ formulario_configuracao.as_p }}
+                <button class="button" type="submit">Salvar e adaptar fichas</button>
+            </form>
         </section>
         <p class="feedback" data-master-feedback role="status" aria-live="polite"></p>
     </main>
@@ -83,5 +230,5 @@
 
 {% block scripts %}
     {% load static %}
-    <script src="{% static 'js/mesa.js' %}" defer></script>
+    <script src="{% static 'js/mesa.js' %}?v=11" defer></script>
 {% endblock %}

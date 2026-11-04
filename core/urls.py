@@ -5,6 +5,15 @@ from . import views
 urlpatterns = [
     path('', views.home, name='home'),
     path('service-worker.js', views.service_worker, name='service_worker'),
+    path('mesas/', views.lista_mesas, name='lista_mesas'),
+    path('mesas/criar/', views.criar_mesa, name='criar_mesa'),
+    path('mesas/inscrever/', views.inscrever_ficha_mesa, name='inscrever_ficha_mesa'),
+    path(
+        'mesas/<int:mesa_pk>/fichas/<int:ficha_pk>/remover/',
+        views.remover_inscricao_mesa,
+        name='remover_inscricao_mesa',
+    ),
+    path('mesas/<int:pk>/excluir/', views.excluir_mesa, name='excluir_mesa'),
     path('mesa/cenas/', views.lista_cenas, name='lista_cenas'),
     path('mesa/cenas/criar/', views.criar_cena, name='criar_cena'),
     path('mesa/cenas/<int:pk>/', views.detalhe_cena, name='detalhe_cena'),

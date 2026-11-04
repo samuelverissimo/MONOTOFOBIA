@@ -87,10 +87,19 @@ class Command(BaseCommand):
             classe = Classe.objects.filter(slug=classe_slug).first()
             if classe is None:
                 raise CommandError(f'Classe {classe_slug} ausente na trilha {registro["slug"]}.')
+            try:
+                validar_pre_requisitos(registro.get('pre_requisitos', {}))
+            except ValidationError as erro:
+                raise CommandError(
+                    f"Pré-requisitos inválidos para a trilha {registro['slug']}."
+                ) from erro
             dados = {
                 key: value
                 for key, value in registro.items()
-                if key in {'nome', 'fonte', 'personalizado', 'resumo', 'habilidades'}
+                if key in {
+                    'nome', 'fonte', 'personalizado', 'resumo', 'habilidades',
+                    'pre_requisitos',
+                }
             }
             objeto, criado = Trilha.objects.update_or_create(
                 slug=registro['slug'], defaults={**dados, 'classe': classe},
@@ -119,12 +128,12 @@ class Command(BaseCommand):
             }),
         ):
             for registro in self._ler(arquivo):
-                if modelo is Poder:
+                if modelo in (Poder, Trilha):
                     try:
                         validar_pre_requisitos(registro.get('pre_requisitos', {}))
                     except ValidationError as erro:
                         raise CommandError(
-                            f"Pré-requisitos inválidos para o poder {registro['slug']}."
+                            f"Pré-requisitos inválidos para o registro {registro['slug']}."
                         ) from erro
                 _, criado = self._atualizar(modelo, registro, campos=campos)
                 contagens['criados' if criado else 'atualizados'] += 1

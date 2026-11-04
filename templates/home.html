@@ -7,15 +7,12 @@
     <header class="topbar">
         <p>Olá, {{ user.username }}</p>
         <nav aria-label="Conta">
-            <a href="{% url 'lista_cenas' %}">Cenas da mesa</a>
-            <a href="{% url 'fichas:historico_rolagens' %}">Histórico de rolagens</a>
-            {% if user.is_superuser %}<a href="{% url 'painel_mestre' %}">Painel do mestre</a>{% endif %}
-            {% if user.is_superuser %}<a href="{% url 'fichas:configurar_mesa' %}">Configurar mesa</a>{% endif %}
-            <a href="{% url 'password_change' %}">Alterar senha</a>
-            <form method="post" action="{% url 'logout' %}">
-                {% csrf_token %}
-                <button class="button" type="submit">Sair</button>
-            </form>
+            {% if mestre %}
+                <a class="button button-secondary" href="{% url 'painel_mestre' %}">Painel do mestre</a>
+            {% else %}
+                <a href="{% url 'lista_mesas' %}">Encontrar mesas</a>
+            {% endif %}
+            <a class="button button-secondary" href="{% url 'account_profile' %}">Perfil e conta</a>
         </nav>
     </header>
     <main class="home-content">
@@ -27,8 +24,25 @@
             <ul class="sheet-list">
                 {% for ficha in fichas %}
                     <li>
-                        <a href="{% url 'fichas:detalhe' ficha.pk %}">{{ ficha.nome }}</a>
-                        <span>{{ ficha.classe|default:'Sem classe' }} · {{ ficha.get_status_display }}</span>
+                        <div>
+                            <a href="{% url 'fichas:detalhe' ficha.pk %}">{{ ficha.nome }}</a>
+                            <span>{{ ficha.classe|default:'Sem classe' }} · {{ ficha.get_status_display }}</span>
+                            <span>
+                                {% for mesa in ficha.mesas.all %}
+                                    {% if not forloop.first %} · {% endif %}{{ mesa.nome }}
+                                {% empty %}
+                                    Sem mesa
+                                {% endfor %}
+                            </span>
+                        </div>
+                        <details class="delete-confirm">
+                            <summary>Excluir ficha</summary>
+                            <p>Esta ação apaga a ficha e seus registros permanentemente.</p>
+                            <form method="post" action="{% url 'fichas:excluir' ficha.pk %}">
+                                {% csrf_token %}
+                                <button class="button button-secondary" type="submit">Confirmar exclusão</button>
+                            </form>
+                        </details>
                     </li>
                 {% endfor %}
             </ul>

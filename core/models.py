@@ -1,5 +1,69 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.validators import RegexValidator
 from django.db import models
+from django.utils.crypto import get_random_string
+
+
+class Mesa(models.Model):
+    mestre = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='mesas_criadas',
+    )
+    nome = models.CharField(max_length=100)
+    publica = models.BooleanField(default=False)
+    codigo_acesso = models.CharField(
+        max_length=8,
+        unique=True,
+        null=True,
+        blank=True,
+        validators=[RegexValidator(r'^[0-9]{8}$', 'O código deve conter exatamente 8 dígitos.')],
+    )
+    criada_em = models.DateTimeField(auto_now_add=True)
+    fichas = models.ManyToManyField(
+        'fichas.Ficha', through='InscricaoMesa', related_name='mesas',
+    )
+
+    class Meta:
+        ordering = ('nome', 'pk')
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(publica=True, codigo_acesso__isnull=True)
+                    | models.Q(publica=False, codigo_acesso__isnull=False)
+                ),
+                name='mesa_codigo_compativel_visibilidade',
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.publica:
+            self.codigo_acesso = None
+        elif not self.codigo_acesso:
+            while True:
+                codigo = get_random_string(8, allowed_chars='0123456789')
+                if not type(self).objects.filter(codigo_acesso=codigo).exists():
+                    self.codigo_acesso = codigo
+                    break
+        elif len(self.codigo_acesso) != 8 or not self.codigo_acesso.isascii() or not self.codigo_acesso.isdigit():
+            raise ValidationError('O código privado deve conter exatamente 8 dígitos.')
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.nome
+
+
+class InscricaoMesa(models.Model):
+    mesa = models.ForeignKey(Mesa, on_delete=models.CASCADE, related_name='inscricoes')
+    ficha = models.ForeignKey(
+        'fichas.Ficha', on_delete=models.CASCADE, related_name='inscricoes_mesa',
+    )
+    inscrita_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('inscrita_em', 'pk')
+        constraints = [
+            models.UniqueConstraint(fields=('mesa', 'ficha'), name='mesa_ficha_inscricao_unica'),
+        ]
 
 
 class CenaMesa(models.Model):

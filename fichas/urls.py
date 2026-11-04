@@ -36,6 +36,13 @@ urlpatterns = [
     path('<int:pk>/inventario/<int:item_pk>/atualizar/', views.atualizar_item, name='atualizar_item'),
     path('<int:pk>/inventario/<int:item_pk>/remover/', views.remover_item, name='remover_item'),
     path('<int:pk>/status/', views.alterar_status_ficha, name='status'),
+    path('<int:pk>/excluir/', views.excluir_ficha, name='excluir'),
+    path('<int:pk>/habilidades/adicionar/', views.adicionar_habilidade, name='adicionar_habilidade'),
+    path(
+        '<int:pk>/habilidades/<int:habilidade_pk>/remover/',
+        views.remover_habilidade,
+        name='remover_habilidade',
+    ),
     path('<int:pk>/', views.detalhe_ficha, name='detalhe'),
     path('<int:pk>/editar/', views.editar_ficha, name='editar'),
 ]

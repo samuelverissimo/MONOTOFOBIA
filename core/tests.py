@@ -3,7 +3,15 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils.crypto import get_random_string
 
-from core.models import AmeacaMesa, CenaMesa, PistaCena, RegistroAmeaca, RegistroCena
+from core.models import (
+    AmeacaMesa,
+    CenaMesa,
+    InscricaoMesa,
+    Mesa,
+    PistaCena,
+    RegistroAmeaca,
+    RegistroCena,
+)
 from fichas.models import Classe, Condicao, ConfiguracaoMesa, Ficha, FichaCondicao, LogAlteracao, Rolagem
 
 User = get_user_model()
@@ -74,8 +82,11 @@ class AuthenticationSecurityTests(TestCase):
 		self.assertEqual(self.client.post(reverse('service_worker')).status_code, 405)
 		login = self.client.get(reverse('login'))
 		self.assertContains(login, 'href="/static/manifest.webmanifest"')
-		self.assertContains(login, 'href="/static/css/style.css"')
+		self.assertContains(login, 'href="/static/css/style.css?v=12"')
 		self.assertContains(login, 'src="/static/js/pwa.js"')
+		self.assertContains(login, 'data-appearance-panel')
+		self.assertContains(login, 'src="/static/js/aparencia.js?v=3"')
+		self.assertNotContains(login, 'id="die-d20"')
 
 	def test_password_change_requires_current_password(self):
 		current_password = get_random_string(32)
@@ -85,29 +96,31 @@ class AuthenticationSecurityTests(TestCase):
 			password=current_password,
 		)
 		self.client.force_login(user)
-		change_url = reverse('password_change')
+		change_url = reverse('account_profile')
 
 		response = self.client.post(
 			change_url,
 			{
+				'acao': 'senha',
 				'old_password': get_random_string(32),
 				'new_password1': new_password,
 				'new_password2': new_password,
 			},
 		)
-		self.assertEqual(response.status_code, 200)
+		self.assertEqual(response.status_code, 400)
 		user.refresh_from_db()
 		self.assertTrue(user.check_password(current_password))
 
 		response = self.client.post(
 			change_url,
 			{
+				'acao': 'senha',
 				'old_password': current_password,
 				'new_password1': new_password,
 				'new_password2': new_password,
 			},
 		)
-		self.assertRedirects(response, reverse('password_change_done'))
+		self.assertRedirects(response, reverse('account_profile'))
 		user.refresh_from_db()
 		self.assertTrue(user.check_password(new_password))
 
@@ -129,6 +142,13 @@ class MasterDashboardTests(TestCase):
             dono=self.owner, nome='Agente do Painel', classe=classe, nex=5,
             anotacoes_mestre='Nota reservada ao mestre',
         )
+        self.table = Mesa.objects.create(
+            mestre=self.master, nome='Mesa do Painel', publica=True,
+        )
+        InscricaoMesa.objects.create(mesa=self.table, ficha=self.ficha)
+        self.scene = CenaMesa.objects.create(
+            criado_por=self.master, nome='Cena do Painel', ativa=False,
+        )
         Rolagem.objects.create(
             ficha=self.ficha, usuario=self.owner, tipo='pericia', descricao='Luta',
             dados=[7, 12], dado_escolhido=12, bonus=5, total=17,
@@ -142,6 +162,9 @@ class MasterDashboardTests(TestCase):
         self.assertEqual(self.client.get(updates_url).status_code, 403)
         home = self.client.get(reverse('home'))
         self.assertNotContains(home, 'Painel do mestre')
+        self.assertContains(home, 'Encontrar mesas')
+        self.assertNotContains(home, 'Cenas da mesa')
+        self.assertNotContains(home, 'Histórico de rolagens')
         self.assertNotContains(home, 'Nota reservada ao mestre')
 
         self.client.force_login(self.master)
@@ -150,6 +173,10 @@ class MasterDashboardTests(TestCase):
         self.assertContains(response, 'Agente do Painel')
         self.assertContains(response, '[7, 12] + 5 = 17')
         self.assertContains(response, 'Ativa: 1')
+        self.assertContains(response, self.table.nome)
+        self.assertContains(response, self.scene.nome)
+        self.assertContains(response, 'Histórico de rolagens')
+        self.assertContains(response, 'Configuração da mesa')
         self.assertNotContains(response, 'Nota reservada ao mestre')
 
         cursor = Rolagem.objects.filter(ficha=self.ficha).latest('pk').pk
@@ -238,6 +265,8 @@ class MasterDashboardTests(TestCase):
 
         self.client.force_login(self.master)
         response = self.client.get(url)
+        self.assertRedirects(response, f'{reverse("painel_mestre")}#historico')
+        response = self.client.get(reverse('painel_mestre'))
         self.assertContains(response, 'Análise reservada')
         self.assertContains(response, 'Ficha alheia')
 
@@ -309,7 +338,7 @@ class SceneManagementTests(TestCase):
             'anotacoes_mestre': 'A criatura ainda está viva.',
         })
         created_scene = CenaMesa.objects.get(nome='Porão')
-        self.assertRedirects(response, reverse('detalhe_cena', args=[created_scene.pk]))
+        self.assertRedirects(response, f'{reverse("painel_mestre")}#cenas')
         self.assertFalse(created_scene.ativa)
         self.assertTrue(RegistroCena.objects.filter(cena=created_scene, acao='criada').exists())
 
@@ -318,7 +347,7 @@ class SceneManagementTests(TestCase):
             'titulo': 'Chave',
             'conteudo': 'Está sob o tapete.',
         })
-        self.assertRedirects(response, reverse('detalhe_cena', args=[self.scene.pk]))
+        self.assertRedirects(response, f'{reverse("painel_mestre")}#cenas')
         clue = PistaCena.objects.get(cena=self.scene, titulo='Chave')
         self.assertEqual(clue.estado, 'oculta')
         self.assertTrue(RegistroCena.objects.filter(
@@ -365,3 +394,94 @@ class SceneManagementTests(TestCase):
 
         self.client.force_login(self.player)
         self.assertEqual(self.client.get(reverse('lista_ameacas')).status_code, 403)
+
+
+class TableEnrollmentTests(TestCase):
+    def setUp(self):
+        password = get_random_string(32)
+        self.master = User.objects.create_superuser(
+            username='table-master', email='table-master@example.com', password=password,
+        )
+        self.player = User.objects.create_user(
+            username='table-player', password=password,
+        )
+        self.other = User.objects.create_user(
+            username='table-other', password=password,
+        )
+        self.ficha = Ficha.objects.create(dono=self.player, nome='Agente de teste', nex=5)
+
+    def test_master_creates_public_and_private_tables_with_private_numeric_code(self):
+        self.client.force_login(self.master)
+        response = self.client.post(reverse('criar_mesa'), {'nome': 'Mesa aberta', 'publica': 'on'})
+        self.assertRedirects(response, f'{reverse("painel_mestre")}#mesas')
+        public = Mesa.objects.get(nome='Mesa aberta')
+        self.assertTrue(public.publica)
+        self.assertIsNone(public.codigo_acesso)
+
+        response = self.client.post(reverse('criar_mesa'), {'nome': 'Mesa fechada'})
+        self.assertRedirects(response, f'{reverse("painel_mestre")}#mesas')
+        private = Mesa.objects.get(nome='Mesa fechada')
+        self.assertFalse(private.publica)
+        self.assertRegex(private.codigo_acesso, r'^[0-9]{8}$')
+        self.assertEqual(Mesa.objects.filter(codigo_acesso=private.codigo_acesso).count(), 1)
+        self.assertContains(self.client.get(reverse('painel_mestre')), private.codigo_acesso)
+
+    def test_public_enrollment_and_private_code_are_scoped_and_removable(self):
+        public = Mesa.objects.create(mestre=self.master, nome='Mesa pública', publica=True)
+        private = Mesa.objects.create(mestre=self.master, nome='Mesa privada')
+        self.client.force_login(self.player)
+
+        page = self.client.get(reverse('lista_mesas'))
+        self.assertContains(page, public.nome)
+        self.assertNotContains(page, private.nome)
+        self.assertNotContains(page, private.codigo_acesso)
+
+        enroll_url = reverse('inscrever_ficha_mesa')
+        response = self.client.post(enroll_url, {
+            'ficha': self.ficha.pk, 'mesa': public.pk, 'codigo_acesso': '',
+        })
+        self.assertRedirects(response, reverse('lista_mesas'))
+        self.assertTrue(InscricaoMesa.objects.filter(mesa=public, ficha=self.ficha).exists())
+        response = self.client.post(enroll_url, {
+            'ficha': self.ficha.pk, 'mesa': '', 'codigo_acesso': '123',
+        })
+        self.assertRedirects(response, reverse('lista_mesas'))
+        self.assertFalse(InscricaoMesa.objects.filter(mesa=private, ficha=self.ficha).exists())
+
+        response = self.client.post(enroll_url, {
+            'ficha': self.ficha.pk, 'mesa': '', 'codigo_acesso': private.codigo_acesso,
+        })
+        self.assertRedirects(response, reverse('lista_mesas'))
+        self.assertTrue(InscricaoMesa.objects.filter(mesa=private, ficha=self.ficha).exists())
+
+        remove_url = reverse(
+            'remover_inscricao_mesa', kwargs={'mesa_pk': public.pk, 'ficha_pk': self.ficha.pk},
+        )
+        self.assertEqual(self.client.get(remove_url).status_code, 405)
+        self.assertEqual(self.client.post(remove_url).status_code, 302)
+        self.assertFalse(InscricaoMesa.objects.filter(mesa=public, ficha=self.ficha).exists())
+        self.assertEqual(self.client.post(
+            reverse('excluir_mesa', kwargs={'pk': private.pk}),
+        ).status_code, 404)
+
+    def test_non_master_cannot_create_tables_or_enroll_another_players_sheet(self):
+        self.client.force_login(self.player)
+        self.assertEqual(self.client.post(
+            reverse('criar_mesa'), {'nome': 'Não autorizada'},
+        ).status_code, 403)
+        public = Mesa.objects.create(mestre=self.master, nome='Mesa aberta', publica=True)
+        outra_ficha = Ficha.objects.create(dono=self.other, nome='Privada', nex=5)
+        self.assertEqual(self.client.post(reverse('inscrever_ficha_mesa'), {
+            'ficha': outra_ficha.pk, 'mesa': public.pk,
+        }).status_code, 302)
+        self.assertFalse(InscricaoMesa.objects.filter(ficha=outra_ficha).exists())
+
+    def test_deleting_table_keeps_character_sheet(self):
+        public = Mesa.objects.create(mestre=self.master, nome='Mesa aberta', publica=True)
+        InscricaoMesa.objects.create(mesa=public, ficha=self.ficha)
+        self.client.force_login(self.master)
+        response = self.client.post(reverse('excluir_mesa', kwargs={'pk': public.pk}))
+        self.assertRedirects(response, f'{reverse("painel_mestre")}#mesas')
+        self.assertFalse(Mesa.objects.filter(pk=public.pk).exists())
+        self.assertTrue(Ficha.objects.filter(pk=self.ficha.pk).exists())
+        self.assertFalse(InscricaoMesa.objects.filter(ficha=self.ficha).exists())

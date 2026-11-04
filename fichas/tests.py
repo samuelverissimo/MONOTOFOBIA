@@ -12,8 +12,9 @@ from django.test import Client, SimpleTestCase, TestCase
 from django.urls import reverse
 from django.utils.crypto import get_random_string
 
-from core.models import AmeacaMesa
+from core.models import AmeacaMesa, InscricaoMesa, Mesa
 from fichas.efeitos import explicar_teste
+from fichas.forms import CriacaoInicialForm
 from fichas.models import (
     Atributo,
     Classe,
@@ -23,6 +24,7 @@ from fichas.models import (
     Ficha,
     FichaCondicao,
     FerimentoDebilitante,
+    HabilidadeFicha,
     FichaPoder,
     FichaPericia,
     FichaRitual,
@@ -307,8 +309,9 @@ class ConfiguracaoMesaFormTests(SimpleTestCase):
         self.assertIn('sistema_progressao', form.fields)
         self.assertFalse(ConfiguracaoMesaForm({**dados, 'modo_recursos': 'inventado'}).is_valid())
         self.assertFalse(ConfiguracaoMesaForm({**dados, 'max_fichas_ativas': 0}).is_valid())
-        self.assertFalse(ConfiguracaoMesaForm({
+        self.assertTrue(ConfiguracaoMesaForm({
             **dados, 'sistema_progressao': 'patentes',
+            'modo_recursos': 'sem_sanidade',
         }).is_valid())
         self.assertTrue(ConfiguracaoMesaForm({
             **dados, 'modo_recursos': 'sem_sanidade',
@@ -404,7 +407,12 @@ class FichaViewsTests(TestCase):
             'pericia_obrigatoria_0': self.luta.pk, 'pericias_escolhidas': [self.pontaria.pk],
         })
         self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 6}))
-        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 6}), {'confirmar': 'on'})
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 6}), {
+            'confirmar': 'on', 'nex_inicial': '5',
+            f'grau_pericia_{self.fortitude.pk}': 'treinado',
+            f'grau_pericia_{self.luta.pk}': 'treinado',
+            f'grau_pericia_{self.pontaria.pk}': 'treinado',
+        })
 
         ficha = Ficha.objects.get(nome='Nova agente')
         self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': ficha.pk}))
@@ -430,11 +438,117 @@ class FichaViewsTests(TestCase):
         self.client.post(reverse('fichas:criar', kwargs={'etapa': 5}), {
             'pericia_obrigatoria_0': self.luta.pk, 'pericias_escolhidas': [self.pontaria.pk],
         })
-        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 6}), {'confirmar': 'on'})
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 6}), {
+            'confirmar': 'on', 'nivel_inicial': '1', 'nex_paranormal': '0',
+            f'grau_pericia_{self.fortitude.pk}': 'treinado',
+            f'grau_pericia_{self.luta.pk}': 'treinado',
+            f'grau_pericia_{self.pontaria.pk}': 'treinado',
+        })
         self.assertEqual(response.status_code, 302, response.get('Location'))
         ficha = Ficha.objects.get(nome='Agente de nível')
         self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': ficha.pk}))
         self.assertEqual((ficha.nex, ficha.nivel_experiencia, ficha.pv_atual), (0, 1, 23))
+
+    def test_creation_validates_trail_prerequisites_and_sets_starting_training(self):
+        trilha = Trilha.objects.create(
+            nome='Linha de frente',
+            slug='linha-de-frente',
+            fonte='teste',
+            resumo='',
+            classe=self.classe,
+            pre_requisitos={
+                'nex_min': 10,
+                'pericias_treinadas': ['fortitude'],
+            },
+        )
+        self.client.force_login(self.owner)
+        self.client.get(reverse('fichas:iniciar'))
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {
+            'nome': 'Agente avançada', 'conceito': 'Investigadora',
+            'aparencia': 'Casaco escuro', 'personalidade': 'Atenta',
+            'historia': 'Chegou à Ordem.', 'objetivo': 'Investigar',
+        })
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 2}), {
+            'agilidade': 3, 'forca': 2, 'intelecto': 0, 'presenca': 1, 'vigor': 3,
+        })
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 3}), {
+            'origem': self.origem.pk,
+        })
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 4}), {
+            'classe': self.classe.pk,
+        })
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 5}), {
+            'pericia_obrigatoria_0': self.luta.pk,
+            'pericias_escolhidas': [self.pontaria.pk],
+        })
+        inicial = {
+            'confirmar': 'on',
+            'nex_inicial': '5',
+            'trilha': trilha.pk,
+            f'grau_pericia_{self.fortitude.pk}': 'treinado',
+            f'grau_pericia_{self.luta.pk}': 'treinado',
+            f'grau_pericia_{self.pontaria.pk}': 'treinado',
+        }
+        response = self.client.post(
+            reverse('fichas:criar', kwargs={'etapa': 6}), inicial,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response, 'A ficha ainda não atende aos pré-requisitos desta trilha.',
+        )
+        self.assertFalse(Ficha.objects.filter(nome='Agente avançada').exists())
+
+        inicial['nex_inicial'] = '35'
+        inicial[f'grau_pericia_{self.fortitude.pk}'] = 'veterano'
+        inicial[f'grau_pericia_{self.luta.pk}'] = 'veterano'
+        inicial[f'grau_pericia_{self.pontaria.pk}'] = 'expert'
+        response = self.client.post(
+            reverse('fichas:criar', kwargs={'etapa': 6}), inicial,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response, 'Os graus escolhidos excedem os aprimoramentos de perícia',
+        )
+        self.assertFalse(Ficha.objects.filter(nome='Agente avançada').exists())
+
+        inicial[f'grau_pericia_{self.pontaria.pk}'] = 'treinado'
+        response = self.client.post(
+            reverse('fichas:criar', kwargs={'etapa': 6}), inicial,
+        )
+        ficha = Ficha.objects.get(nome='Agente avançada')
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': ficha.pk}))
+        self.assertEqual((ficha.nex, ficha.trilha), (35, trilha))
+        self.assertEqual(
+            dict(ficha.pericias.values_list('pericia__slug', 'grau')),
+            {'fortitude': 'veterano', 'luta': 'veterano', 'pontaria': 'treinado'},
+        )
+        self.assertFalse(ficha.pendencias.filter(tipo='trilha').exists())
+        self.assertFalse(ficha.pendencias.filter(tipo='treinamento').exists())
+
+    def test_survivor_creation_cannot_start_with_advanced_skill_degrees(self):
+        sobrevivente = Classe.objects.create(
+            nome='Sobrevivente', slug='sobrevivente', fonte='SaH', resumo='',
+        )
+        mesa = ConfiguracaoMesa.objects.create()
+        form = CriacaoInicialForm(
+            data={
+                'confirmar': 'on',
+                'estagio_inicial': '3',
+                f'grau_pericia_{self.luta.pk}': 'veterano',
+            },
+            mesa=mesa,
+            classe=sobrevivente,
+            origem=self.origem,
+            atributos={'intelecto': 1},
+            pericia_ids=[self.luta.pk],
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn(
+            'Os graus escolhidos excedem os aprimoramentos de perícia disponíveis '
+            'nesta progressão.',
+            form.non_field_errors(),
+        )
 
     def test_free_creation_mode_is_granted_only_to_master(self):
         self.client.force_login(self.other)
@@ -496,8 +610,10 @@ class FichaViewsTests(TestCase):
         self.assertEqual(self.ficha.pv_atual, 12)
         response = self.client.post(resource, data='{"recurso":"pv","delta":999}', content_type='application/json')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()['atual'], response.json()['maximo'])
-        self.assertEqual(response.json()['aplicado'] + response.json()['sobrou'], 999)
+        self.assertEqual(response.json()['atual'], 1011)
+        self.assertEqual(response.json()['temporario'], 990)
+        self.assertEqual(response.json()['aplicado'], 999)
+        self.assertEqual(response.json()['sobrou'], 0)
         self.assertEqual(self.client.post(resource, data='{"recurso":"pv","delta":true}', content_type='application/json').status_code, 400)
         self.assertEqual(self.client.post(resource, data='{"recurso":[],"delta":1}', content_type='application/json').status_code, 400)
         self.assertEqual(self.client.post(resource, data='{"recurso":"pd","delta":1}', content_type='application/json').status_code, 400)
@@ -530,42 +646,40 @@ class FichaViewsTests(TestCase):
             roll_url, data='{}', content_type='application/json',
         ).status_code, 400)
 
-    def test_temporary_pv_adjustment_is_clamped_audited_and_private(self):
+    def test_temporary_resources_are_excess_over_maximum_and_audited(self):
         resource = reverse('fichas:recurso', kwargs={'pk': self.ficha.pk})
         self.client.force_login(self.owner)
 
         response = self.client.post(
             resource,
-            data='{"recurso":"pv_temporario","delta":7}',
+            data='{"recurso":"pv","delta":7}',
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            (response.json()['atual'], response.json()['maximo'], response.json()['aplicado']),
-            (7, None, 7),
-        )
+        self.assertEqual(response.json()['atual'], 17)
+        self.assertEqual(response.json()['temporario'], 0)
         self.ficha.refresh_from_db()
-        self.assertEqual(self.ficha.pv_temporario, 7)
+        self.assertEqual(self.ficha.pv_atual, 17)
         self.assertTrue(LogAlteracao.objects.filter(
-            ficha=self.ficha, campo='pv_temporario', valor_antigo='0', valor_novo='7',
+            ficha=self.ficha, campo='pv_atual', valor_antigo='10', valor_novo='17',
         ).exists())
 
         response = self.client.post(
             resource,
-            data='{"recurso":"pv_temporario","delta":-9}',
+            data='{"recurso":"pv","delta":-9}',
             content_type='application/json',
         )
-        self.assertEqual((response.status_code, response.json()['atual']), (200, 0))
-        self.assertEqual(response.json()['sobrou'], -2)
+        self.assertEqual((response.status_code, response.json()['atual']), (200, 8))
+        self.assertEqual(response.json()['temporario'], 0)
         estado = self.client.get(
             reverse('fichas:atualizacoes', kwargs={'pk': self.ficha.pk}),
         ).json()
-        self.assertEqual(estado['pv_temporario'], 0)
+        self.assertNotIn('pv_temporario', estado)
 
         self.client.force_login(self.other)
         self.assertEqual(self.client.post(
             resource,
-            data='{"recurso":"pv_temporario","delta":1}',
+            data='{"recurso":"pv","delta":1}',
             content_type='application/json',
         ).status_code, 404)
 
@@ -573,7 +687,60 @@ class FichaViewsTests(TestCase):
         response = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
         self.assertContains(response, 'data-session-mode-toggle')
         self.assertContains(response, 'data-wake-lock-toggle')
-        self.assertContains(response, 'data-resource-adjustment="pv_temporario"')
+        self.assertContains(response, 'data-overflow="pv"')
+        self.assertNotContains(response, 'data-resource-panel="pv_temporario"')
+        self.assertContains(response, 'id="die-d20"')
+        self.assertContains(response, 'data-die-face="4"')
+        self.assertContains(response, 'data-die-face="20"')
+
+    def test_resource_increment_crosses_maximum_then_depletes_temporary_first(self):
+        self.client.force_login(self.owner)
+        configuracao = ConfiguracaoMesa.objects.create()
+        recursos = (
+            ('pv', 'pv_atual', 21),
+            ('pe', 'pe_atual', 3),
+            ('san', 'san_atual', 12),
+        )
+        for recurso, campo, maximo in recursos:
+            with self.subTest(recurso=recurso):
+                diferenca = min(4, maximo)
+                setattr(self.ficha, campo, maximo - diferenca)
+                self.ficha.save(update_fields=(campo,))
+                url = reverse('fichas:recurso', kwargs={'pk': self.ficha.pk})
+                resposta = self.client.post(
+                    url,
+                    data=json.dumps({'recurso': recurso, 'delta': 5}),
+                    content_type='application/json',
+                )
+                self.assertEqual(resposta.status_code, 200)
+                self.assertEqual(
+                    (resposta.json()['atual'], resposta.json()['temporario']),
+                    (maximo + 5 - diferenca, 5 - diferenca),
+                )
+                resposta = self.client.post(
+                    url,
+                    data=json.dumps({'recurso': recurso, 'delta': -1}),
+                    content_type='application/json',
+                )
+                self.assertEqual(
+                    resposta.json()['atual'],
+                    maximo + max(0, 4 - diferenca),
+                )
+                self.assertEqual(
+                    resposta.json()['temporario'], max(0, 4 - diferenca),
+                )
+
+        configuracao.modo_recursos = 'sem_sanidade'
+        configuracao.save(update_fields=('modo_recursos',))
+        self.ficha.pd_atual = 3
+        self.ficha.save(update_fields=('pd_atual',))
+        resposta = self.client.post(
+            reverse('fichas:recurso', kwargs={'pk': self.ficha.pk}),
+            data='{"recurso":"pd","delta":5}',
+            content_type='application/json',
+        )
+        self.assertEqual(resposta.status_code, 200)
+        self.assertEqual((resposta.json()['atual'], resposta.json()['temporario']), (8, 1))
 
     def test_damage_endpoint_evaluates_physical_dice_and_persists_roll(self):
         self.client.force_login(self.owner)
@@ -780,21 +947,18 @@ class FichaViewsTests(TestCase):
             'fichas:aplicar_dano_combate',
             kwargs={'pk': encontro.pk, 'participante_pk': participante.pk},
         )
-        self.ficha.pv_temporario = 2
-        self.ficha.save(update_fields=('pv_temporario',))
+        self.ficha.pv_atual = 12
+        self.ficha.save(update_fields=('pv_atual',))
 
         self.client.force_login(self.owner)
         self.assertEqual(self.client.post(dano_url, {'dano': 4}).status_code, 403)
         self.ficha.refresh_from_db()
-        self.assertEqual((self.ficha.pv_atual, self.ficha.pv_temporario), (10, 2))
+        self.assertEqual(self.ficha.pv_atual, 12)
 
         self.client.force_login(self.master)
         self.assertEqual(self.client.post(dano_url, {'dano': 4}).status_code, 302)
         self.ficha.refresh_from_db()
-        self.assertEqual((self.ficha.pv_atual, self.ficha.pv_temporario), (8, 0))
-        self.assertTrue(LogAlteracao.objects.filter(
-            ficha=self.ficha, campo='pv_temporario', valor_novo='0',
-        ).exists())
+        self.assertEqual(self.ficha.pv_atual, 8)
 
         self.assertEqual(self.client.post(dano_url, {'dano': 10}).status_code, 302)
         self.ficha.refresh_from_db()
@@ -1023,14 +1187,14 @@ class FichaViewsTests(TestCase):
         self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
         ferimento = FerimentoDebilitante.objects.get(ficha=self.ficha)
         self.ficha.refresh_from_db()
-        self.assertEqual(self.ficha.pv_atual, 20)
+        self.assertEqual(self.ficha.pv_atual, 21)
         self.assertEqual(self.client.get(
             reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk})
         ).context['maximos']['pv'], 20)
         self.assertTrue(LogAlteracao.objects.filter(
             ficha=self.ficha, campo='ferimento_debilitante', valor_novo='vigor',
         ).exists())
-        self.assertTrue(LogAlteracao.objects.filter(
+        self.assertFalse(LogAlteracao.objects.filter(
             ficha=self.ficha, campo='pv_atual', valor_novo='20',
         ).exists())
 
@@ -1059,7 +1223,7 @@ class FichaViewsTests(TestCase):
         self.assertEqual(self.client.get(
             reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk})
         ).context['maximos']['pv'], 21)
-        self.assertEqual(self.ficha.pv_atual, 20)
+        self.assertEqual(self.ficha.pv_atual, 21)
 
     def test_condition_escalation_is_audited_and_updates_defense_poll(self):
         self.client.force_login(self.owner)
@@ -1408,11 +1572,10 @@ class FichaViewsTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
-    def test_pv_damage_uses_temporary_pv_and_clamps_excess_with_audit(self):
+    def test_pv_damage_consumes_overflow_before_base_and_clamps_at_zero(self):
         self.client.force_login(self.owner)
-        self.ficha.pv_atual = 3
-        self.ficha.pv_temporario = 2
-        self.ficha.save(update_fields=('pv_atual', 'pv_temporario'))
+        self.ficha.pv_atual = 5
+        self.ficha.save(update_fields=('pv_atual',))
         resource = reverse('fichas:recurso', kwargs={'pk': self.ficha.pk})
 
         response = self.client.post(
@@ -1421,17 +1584,14 @@ class FichaViewsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            (response.json()['atual'], response.json()['pv_temporario'],
+            (response.json()['atual'], response.json()['temporario_aplicado'],
              response.json()['aplicado'], response.json()['sobrou']),
             (0, 0, -5, -5),
         )
         self.ficha.refresh_from_db()
-        self.assertEqual((self.ficha.pv_atual, self.ficha.pv_temporario), (0, 0))
+        self.assertEqual(self.ficha.pv_atual, 0)
         self.assertTrue(LogAlteracao.objects.filter(
-            ficha=self.ficha, campo='pv_temporario', valor_antigo='2', valor_novo='0',
-        ).exists())
-        self.assertTrue(LogAlteracao.objects.filter(
-            ficha=self.ficha, campo='pv_atual', valor_antigo='3', valor_novo='0',
+            ficha=self.ficha, campo='pv_atual', valor_antigo='5', valor_novo='0',
         ).exists())
 
         maximo = calcular_pv_max('combatente', self.ficha.vigor, self.ficha.nex)
@@ -1442,7 +1602,7 @@ class FichaViewsTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual((response.json()['atual'], response.json()['aplicado'], response.json()['sobrou']),
-                         (maximo, 1, 9))
+                         (maximo + 9, 10, 0))
         self.ficha.pv_atual = maximo + 7
         self.ficha.save(update_fields=('pv_atual',))
         response = self.client.post(
@@ -1451,8 +1611,8 @@ class FichaViewsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             (response.json()['atual'], response.json()['aplicado'],
-             response.json()['sobrou'], response.json()['correcao_por_limite']),
-            (maximo - 1, -1, 0, -7),
+             response.json()['sobrou'], response.json()['temporario_aplicado']),
+            (maximo + 6, -1, 0, 1),
         )
 
     def test_inactive_sheets_are_read_only_for_owner_and_editable_by_master(self):
@@ -1527,7 +1687,7 @@ class FichaViewsTests(TestCase):
         self.assertContains(response, '<meta name="csrf-token" content="')
         self.assertTrue(response.cookies['csrftoken']['httponly'])
 
-    def test_player_detail_shows_physical_roll_ui_but_hides_master_notes(self):
+    def test_player_detail_shows_simple_digital_roll_ui_but_hides_master_notes(self):
         self.client.force_login(self.owner)
         condicao = Condicao.objects.create(
             nome='Temporária', slug='temporaria', fonte='Personalizado', resumo='',
@@ -1538,7 +1698,10 @@ class FichaViewsTests(TestCase):
 
         response = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
 
-        self.assertContains(response, 'Dados físicos (principal)')
+        self.assertContains(response, 'Rolar teste')
+        self.assertContains(response, 'Ajustes opcionais')
+        self.assertNotContains(response, 'Dados físicos (principal)')
+        self.assertNotContains(response, 'Resultados dos dados físicos')
         self.assertContains(response, 'data-attribute-value="1"')
         self.assertContains(response, 'id="condition-turns"')
         self.assertContains(response, 'Turnos restantes: 2.')
@@ -1546,6 +1709,102 @@ class FichaViewsTests(TestCase):
         self.client.force_login(self.master)
         response = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
         self.assertContains(response, 'segredo do mestre')
+
+    def test_sheet_overview_shows_progression_prestige_movement_and_table(self):
+        mesa = Mesa.objects.create(
+            mestre=self.master, nome='Arquivo Central', publica=True,
+        )
+        InscricaoMesa.objects.create(mesa=mesa, ficha=self.ficha)
+        self.ficha.deslocamento_bonus = 3
+        self.ficha.pontos_prestigio = 12
+        self.ficha.save(update_fields=('deslocamento_bonus', 'pontos_prestigio'))
+        self.client.force_login(self.owner)
+
+        response = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+
+        self.assertContains(response, 'NEX 5%')
+        self.assertContains(response, '12')
+        self.assertContains(response, '12 m')
+        self.assertContains(response, mesa.nome)
+
+    def test_owner_and_master_can_manage_custom_sheet_abilities(self):
+        add_url = reverse('fichas:adicionar_habilidade', kwargs={'pk': self.ficha.pk})
+        self.client.force_login(self.owner)
+        response = self.client.post(add_url, {
+            'nome': 'Reflexos rápidos', 'descricao': 'Uma habilidade personalizada.',
+        })
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        habilidade = HabilidadeFicha.objects.get(ficha=self.ficha)
+        self.assertEqual(habilidade.criada_por, self.owner)
+        self.assertTrue(LogAlteracao.objects.filter(
+            ficha=self.ficha, campo='habilidade.adicionada', valor_novo=habilidade.nome,
+        ).exists())
+        self.assertContains(
+            self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk})),
+            'Uma habilidade personalizada.',
+        )
+
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.post(add_url, {
+            'nome': 'Não autorizada', 'descricao': 'Outro usuário.',
+        }).status_code, 404)
+
+        self.client.force_login(self.master)
+        response = self.client.post(add_url, {
+            'nome': 'Ordem do mestre', 'descricao': 'Incluída pelo mestre.',
+        })
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        habilidade_mestre = HabilidadeFicha.objects.get(nome='Ordem do mestre')
+        self.assertEqual(habilidade_mestre.criada_por, self.master)
+        self.assertEqual(self.client.post(reverse(
+            'fichas:remover_habilidade',
+            kwargs={'pk': self.ficha.pk, 'habilidade_pk': habilidade_mestre.pk},
+        )).status_code, 302)
+        self.assertFalse(HabilidadeFicha.objects.filter(pk=habilidade_mestre.pk).exists())
+
+    def test_owner_can_delete_sheet_and_remove_its_combat_participant(self):
+        outra_ficha = Ficha.objects.create(dono=self.other, nome='Outro agente', nex=5)
+        encontro = EncontroCombate.objects.create(criado_por=self.master, nome='Combate ativo')
+        participante_ficha = ParticipanteCombate.objects.create(
+            encontro=encontro, ficha=self.ficha, nome=self.ficha.nome, iniciativa=20,
+        )
+        ParticipanteCombate.objects.create(
+            encontro=encontro, ficha=outra_ficha, nome=outra_ficha.nome, iniciativa=10,
+        )
+        encontro.indice_turno = 0
+        encontro.save(update_fields=('indice_turno',))
+        excluir_url = reverse('fichas:excluir', kwargs={'pk': self.ficha.pk})
+
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.post(excluir_url).status_code, 404)
+        self.assertTrue(Ficha.objects.filter(pk=self.ficha.pk).exists())
+
+        self.client.force_login(self.owner)
+        response = self.client.get(excluir_url)
+        self.assertEqual(response.status_code, 405)
+        response = self.client.post(excluir_url)
+        self.assertRedirects(response, reverse('home'))
+        self.assertFalse(Ficha.objects.filter(pk=self.ficha.pk).exists())
+        self.assertFalse(ParticipanteCombate.objects.filter(pk=participante_ficha.pk).exists())
+        encontro.refresh_from_db()
+        self.assertEqual(encontro.indice_turno, -1)
+
+    def test_digital_roll_can_compare_result_with_difficulty(self):
+        self.client.force_login(self.owner)
+        with patch('fichas.regras.secrets.SystemRandom', return_value=FixedDice([12])):
+            response = self.client.post(
+                reverse('fichas:rolar', kwargs={'pk': self.ficha.pk}),
+                data=json.dumps({
+                    'tipo': 'atributo', 'alvo': 'agilidade', 'bonus': 0, 'dt': 12,
+                }),
+                content_type='application/json',
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            (response.json()['dados'], response.json()['total'],
+             response.json()['dt'], response.json()['sucesso']),
+            ([12], 12, 12, True),
+        )
 
     def test_polling_endpoint_is_scoped_and_excludes_private_notes_and_hidden_resources(self):
         condicao = Condicao.objects.create(
@@ -1723,7 +1982,12 @@ class FichaViewsTests(TestCase):
         })
         Ficha.objects.create(dono=self.owner, nome='Criada em outra sessão', nex=5)
 
-        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 6}), {'confirmar': 'on'})
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 6}), {
+            'confirmar': 'on', 'nex_inicial': '5',
+            f'grau_pericia_{self.fortitude.pk}': 'treinado',
+            f'grau_pericia_{self.luta.pk}': 'treinado',
+            f'grau_pericia_{self.pontaria.pk}': 'treinado',
+        })
         self.assertRedirects(response, reverse('home'))
         self.assertFalse(Ficha.objects.filter(dono=self.owner, nome='Nova agente').exists())
         self.assertNotIn('fichas.criacao', self.client.session)
@@ -1742,20 +2006,24 @@ class ConfiguracaoMesaViewsTests(TestCase):
         self.assertEqual(self.client.get(url).status_code, 403)
 
         self.client.force_login(self.master)
-        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertRedirects(
+            self.client.get(url), f'{reverse("painel_mestre")}#configuracao',
+        )
         response = self.client.post(url, {
             'modo_recursos': 'sem_sanidade', 'jogador_pode_subir_nex': 'on',
             'max_fichas_ativas': 2, 'sistema_progressao': 'nivel_nex',
             'ferimentos_debilitantes': 'on', 'dono': self.owner.pk,
         })
-        self.assertRedirects(response, url)
+        self.assertRedirects(
+            response, f'{reverse("painel_mestre")}#configuracao',
+        )
         mesa = ConfiguracaoMesa.objects.get(pk=1)
         self.assertEqual((mesa.modo_recursos, mesa.jogador_pode_subir_nex, mesa.max_fichas_ativas),
                          ('sem_sanidade', True, 2))
         self.assertEqual(mesa.sistema_progressao, 'nivel_nex')
         self.assertTrue(mesa.ferimentos_debilitantes)
 
-    def test_enabling_debilitating_wounds_clamps_existing_vigor_injuries_with_audit(self):
+    def test_enabling_debilitating_wounds_preserves_pv_over_maximum(self):
         classe = Classe.objects.create(
             nome='Combatente', slug='combatente', fonte='OPRPG', resumo='',
         )
@@ -1770,10 +2038,12 @@ class ConfiguracaoMesaViewsTests(TestCase):
             'max_fichas_ativas': 3,
             'ferimentos_debilitantes': 'on',
         })
-        self.assertRedirects(response, reverse('fichas:configurar_mesa'))
+        self.assertRedirects(
+            response, f'{reverse("painel_mestre")}#configuracao',
+        )
         ficha.refresh_from_db()
-        self.assertEqual((ficha.pv_atual, ficha.versao), (20, 2))
-        self.assertTrue(LogAlteracao.objects.filter(
+        self.assertEqual((ficha.pv_atual, ficha.versao), (21, 1))
+        self.assertFalse(LogAlteracao.objects.filter(
             ficha=ficha, campo='pv_atual', valor_antigo='21', valor_novo='20',
         ).exists())
 
@@ -1954,19 +2224,64 @@ class ProgressaoNivelViewsTests(TestCase):
         self.ficha.refresh_from_db()
         self.assertEqual(self.ficha.nivel_experiencia, 1)
 
-    def test_progression_mode_cannot_change_after_characters_exist(self):
+    def test_progression_mode_change_converts_sheets_and_preserves_resource_excess(self):
+        mesa = ConfiguracaoMesa.objects.get(pk=1)
+        mesa.sistema_progressao = 'nex'
+        mesa.save(update_fields=('sistema_progressao',))
+        self.ficha.nex = 20
+        self.ficha.pv_atual = 100
+        self.ficha.save(update_fields=('nex', 'pv_atual'))
         self.client.force_login(self.master)
         response = self.client.post(reverse('fichas:configurar_mesa'), {
-            'modo_recursos': 'padrao', 'sistema_progressao': 'nex',
+            'modo_recursos': 'padrao', 'sistema_progressao': 'nivel_nex',
             'max_fichas_ativas': 3,
         })
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response,
-            'Não é possível trocar a progressão depois que fichas foram criadas.',
+        self.assertRedirects(
+            response, f'{reverse("painel_mestre")}#configuracao',
         )
         mesa = ConfiguracaoMesa.objects.get(pk=1)
         self.assertEqual(mesa.sistema_progressao, 'nivel_nex')
+        self.ficha.refresh_from_db()
+        self.assertEqual(
+            (self.ficha.nex, self.ficha.nivel_experiencia, self.ficha.pv_atual, self.ficha.versao),
+            (0, 4, 100, 2),
+        )
+        self.assertTrue(LogAlteracao.objects.filter(
+            ficha=self.ficha, campo='configuracao.nivel_experiencia',
+            valor_antigo='1', valor_novo='4',
+        ).exists())
+
+    def test_switching_to_patents_assigns_equivalent_rank_without_losing_prestige(self):
+        ConfiguracaoMesa.objects.create(
+            modo_recursos='padrao', sistema_progressao='nex',
+        )
+        recruta = Patente.objects.create(
+            nome='Recruta', slug='recruta', fonte='SaH',
+            pontos_prestigio=0, credito='Baixo', limite_pd=1, recuperacao=1,
+        )
+        operador = Patente.objects.create(
+            nome='Operador', slug='operador', fonte='SaH',
+            pontos_prestigio=20, credito='Médio', limite_pd=3, recuperacao=2,
+        )
+        self.ficha.nex = 30
+        self.ficha.pontos_prestigio = 7
+        self.ficha.pv_atual = 100
+        self.ficha.save(update_fields=('nex', 'pontos_prestigio', 'pv_atual'))
+        self.client.force_login(self.master)
+
+        response = self.client.post(reverse('fichas:configurar_mesa'), {
+            'modo_recursos': 'sem_sanidade', 'sistema_progressao': 'patentes',
+            'max_fichas_ativas': 3,
+        })
+
+        self.assertRedirects(response, f'{reverse("painel_mestre")}#configuracao')
+        self.ficha.refresh_from_db()
+        self.assertEqual(
+            (self.ficha.nex, self.ficha.nivel_experiencia, self.ficha.patente_id,
+             self.ficha.pontos_prestigio, self.ficha.pv_atual),
+            (None, None, operador.pk, 7, 100),
+        )
+        self.assertNotEqual(self.ficha.patente_id, recruta.pk)
 
     def test_stage_five_cicatrizado_choice_is_saved_and_used_once_per_session(self):
         sobrevivente = Classe.objects.create(
@@ -2187,7 +2502,10 @@ class ProgressaoPatentesViewsTests(TestCase):
             'pericias_escolhidas': [luta.pk],
         })
         response = self.client.post(
-            reverse('fichas:criar', kwargs={'etapa': 6}), {'confirmar': 'on'},
+            reverse('fichas:criar', kwargs={'etapa': 6}), {
+                'confirmar': 'on', 'patente_inicial': self.recruta.pk,
+                f'grau_pericia_{luta.pk}': 'treinado',
+            },
         )
 
         ficha = Ficha.objects.get(nome='Agente recruta')
@@ -2270,6 +2588,7 @@ class CarregarRegrasTests(TestCase):
                 'trilhas.json': [{
                     'slug': 'trilha-teste', 'nome': 'Trilha de teste', 'fonte': 'teste',
                     'resumo': '', 'classe_slug': 'sobrevivente', 'habilidades': [],
+                    'pre_requisitos': {'estagio_min': 2},
                 }],
                 'poderes.json': [{
                     'slug': 'poder-teste', 'nome': 'Poder de teste', 'fonte': 'teste',
@@ -2296,6 +2615,10 @@ class CarregarRegrasTests(TestCase):
                 call_command('carregar_regras', stdout=None)
 
         self.assertEqual(Trilha.objects.get(slug='trilha-teste').classe.slug, 'sobrevivente')
+        self.assertEqual(
+            Trilha.objects.get(slug='trilha-teste').pre_requisitos,
+            {'estagio_min': 2},
+        )
         self.assertEqual(Trilha.objects.count(), 1)
         self.assertEqual(Poder.objects.count(), 1)
         self.assertEqual(

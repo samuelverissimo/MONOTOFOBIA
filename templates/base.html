@@ -5,10 +5,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <meta name="theme-color" content="#111111">
+    <meta name="theme-color" content="#07140f">
     <link rel="manifest" href="{% static 'manifest.webmanifest' %}">
     <title>{% block title %}MONOTOFOBIA{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'css/style.css' %}">
+    <link rel="stylesheet" href="{% static 'css/style.css' %}?v=12">
+    <script src="{% static 'js/aparencia.js' %}?v=3"></script>
 </head>
 <body>
     {% if messages %}
@@ -19,6 +20,33 @@
         </div>
     {% endif %}
     {% block content %}{% endblock %}
+    <details class="appearance-panel" data-appearance-panel>
+        <summary><span class="appearance-mark" aria-hidden="true">◐</span>Aparência</summary>
+        <div class="appearance-content">
+            <h2>Personalizar aparência</h2>
+            <fieldset>
+                <legend>Tema</legend>
+                <div class="appearance-theme-options">
+                    <label><input type="radio" name="appearance-theme" value="dark" data-theme-choice>Escuro</label>
+                    <label><input type="radio" name="appearance-theme" value="light" data-theme-choice>Claro</label>
+                </div>
+            </fieldset>
+            <label for="appearance-accent">Cor de destaque</label>
+            <select id="appearance-accent" data-accent-choice>
+                <option value="jade">Verde jade</option>
+                <option value="blue">Azul</option>
+                <option value="violet">Violeta</option>
+                <option value="ruby">Rubi</option>
+                <option value="amber">Âmbar</option>
+            </select>
+            <label class="appearance-scale-label" for="appearance-text-scale">
+                Tamanho do texto <output data-text-scale-value>100%</output>
+            </label>
+            <input id="appearance-text-scale" data-text-scale-control type="range" min="90" max="120" step="5" value="100">
+            <button class="button button-secondary appearance-reset" type="button" data-reset-appearance>Restaurar padrão</button>
+            <p class="appearance-feedback" data-appearance-feedback role="status" aria-live="polite"></p>
+        </div>
+    </details>
         <script src="{% static 'js/pwa.js' %}" defer></script>
         {% block scripts %}{% endblock %}
 </body>

@@ -6,6 +6,31 @@
     let atualizarInstrucaoRolagem = () => {};
     let bloqueioTela = null;
 
+    function atualizarExcedente(recurso, atual, maximo) {
+        const indicador = document.querySelector(`[data-overflow="${recurso}"]`);
+        if (!indicador) return;
+        const quantidade = Math.max(0, Number(atual) - Number(maximo));
+        indicador.hidden = quantidade === 0;
+        indicador.textContent = quantidade
+            ? `${quantidade} temporário${quantidade === 1 ? '' : 's'}`
+            : '';
+    }
+
+    function atualizarRecurso(resultado) {
+        const atual = document.querySelector(`[data-current="${resultado.recurso}"]`);
+        const maximo = document.querySelector(`[data-max="${resultado.recurso}"]`);
+        if (atual) atual.textContent = resultado.atual;
+        if (maximo && resultado.maximo !== null) maximo.textContent = resultado.maximo;
+        atualizarExcedente(resultado.recurso, resultado.atual, resultado.maximo);
+    }
+
+    document.querySelectorAll('[data-overflow]').forEach((indicador) => {
+        const recurso = indicador.dataset.overflow;
+        const atual = document.querySelector(`[data-current="${recurso}"]`);
+        const maximo = document.querySelector(`[data-max="${recurso}"]`);
+        if (atual && maximo) atualizarExcedente(recurso, atual.textContent, maximo.textContent);
+    });
+
     async function enviar(endpoint, dados) {
         operacoesPendentes += 1;
         try {
@@ -80,14 +105,7 @@
                     recurso: recurso.dataset.resource,
                     delta: Number(recurso.dataset.delta),
                 });
-                const atual = document.querySelector(`[data-current="${resultado.recurso}"]`);
-                const maximo = document.querySelector(`[data-max="${resultado.recurso}"]`);
-                if (atual) atual.textContent = resultado.atual;
-                if (maximo && resultado.maximo !== null) maximo.textContent = resultado.maximo;
-                if (resultado.pv_temporario !== null) {
-                    const temporario = document.querySelector('[data-current="pv_temporario"]');
-                    if (temporario) temporario.textContent = resultado.pv_temporario;
-                }
+                atualizarRecurso(resultado);
             } else if (adicionar || escalar || remover) {
                 const seletor = document.querySelector('#condition-select');
                 const campoDuracao = document.querySelector('#condition-turns');
@@ -142,6 +160,26 @@
         }
     });
 
+    const seletorFaces = document.querySelector('#damage-dice-faces');
+    function atualizarDadoSelecionado() {
+        if (!seletorFaces) return;
+        document.querySelectorAll('[data-die-face]').forEach((botao) => {
+            botao.setAttribute(
+                'aria-pressed',
+                String(botao.dataset.dieFace === seletorFaces.value),
+            );
+        });
+    }
+
+    document.addEventListener('click', (event) => {
+        const dado = event.target.closest('[data-die-face]');
+        if (!dado || !seletorFaces) return;
+        seletorFaces.value = dado.dataset.dieFace;
+        atualizarDadoSelecionado();
+    });
+    seletorFaces?.addEventListener('input', atualizarDadoSelecionado);
+    seletorFaces?.addEventListener('change', atualizarDadoSelecionado);
+
     document.addEventListener('submit', async (event) => {
         const formulario = event.target.closest('[data-resource-adjustment]');
         if (!formulario) return;
@@ -155,14 +193,7 @@
         }
         try {
             const resultado = await enviar('recursos', { recurso, delta });
-            const atual = document.querySelector(`[data-current="${resultado.recurso}"]`);
-            const maximo = document.querySelector(`[data-max="${resultado.recurso}"]`);
-            if (atual) atual.textContent = resultado.atual;
-            if (maximo && resultado.maximo !== null) maximo.textContent = resultado.maximo;
-            if (resultado.pv_temporario !== null) {
-                const temporario = document.querySelector('[data-current="pv_temporario"]');
-                if (temporario) temporario.textContent = resultado.pv_temporario;
-            }
+            atualizarRecurso(resultado);
             campo.value = '';
             if (feedback) feedback.textContent = '';
         } catch (erro) {
@@ -222,19 +253,16 @@
     const alvo = document.querySelector('#roll-target');
     const rolagem = document.querySelector('[data-roll-form]');
     const resultadoRolagem = document.querySelector('[data-roll-result]');
-    const modo = document.querySelector('#roll-mode');
     const bonusExtra = document.querySelector('#roll-bonus');
     const dadosExtras = document.querySelector('#roll-extra-dice');
-    const dadosFisicos = document.querySelector('#roll-physical-dice');
     const dtInput = document.querySelector('#roll-dt');
     const instrucoes = document.querySelector('[data-roll-instructions]');
-    const camposFisicos = document.querySelector('[data-physical-fields]');
     const botaoRolagem = document.querySelector('[data-roll-submit]');
     const kitField = document.querySelector('[data-kit-field]');
     const kitCheckbox = document.querySelector('#roll-kit-available');
     const cicatrizadoField = document.querySelector('[data-cicatrizado-field]');
     const cicatrizadoCheckbox = document.querySelector('#roll-cicatrizado-perigo');
-    if (tipo && alvo && rolagem && modo && bonusExtra && dadosExtras && instrucoes) {
+    if (tipo && alvo && rolagem && bonusExtra && dadosExtras && instrucoes) {
         function ehTesteResistencia(opcao) {
             return tipo.value === 'pericia'
                 && ['fortitude', 'reflexos', 'vontade'].includes(opcao.dataset.rollSlug);
@@ -289,9 +317,6 @@
                 + (Number(bonusExtra.value) || 0);
             const operador = bonus > 0 ? '+' : '';
             const instrucaoDados = menor ? 'use o menor' : 'use o maior';
-            const atributoTexto = tipo.value === 'livre'
-                ? 'dados livres'
-                : `atributo-base ${opcao.dataset.attributeName}`;
             const condicao = Number(opcao.dataset.conditionDice) || 0;
             const ferimento = Number(opcao.dataset.woundDice) || 0;
             const modificadorCondicao = tipo.value !== 'livre' && condicao
@@ -306,18 +331,15 @@
             const modificadorCicatrizado = resistencia && cicatrizadoCheckbox?.checked
                 ? ' Cicatrizado contra o perigo marcado: −1 dado.'
                 : '';
-            instrucoes.textContent = `Role ${quantidade}d20; ${instrucaoDados}; ${atributoTexto}; depois some ${operador}${bonus}.${modificadorCondicao}${modificadorFerimento}${modificadorKit}${modificadorCarga}${modificadorCicatrizado}`;
+            instrucoes.textContent = `${quantidade}d20; use o ${instrucaoDados}; some ${operador}${bonus}.${modificadorCondicao}${modificadorFerimento}${modificadorKit}${modificadorCarga}${modificadorCicatrizado}`;
             if (kitField) kitField.hidden = !kitRequired;
             if (cicatrizadoField) {
                 cicatrizadoField.hidden = !resistencia;
                 if (!resistencia && cicatrizadoCheckbox) cicatrizadoCheckbox.checked = false;
             }
             if (botaoRolagem) {
-                botaoRolagem.textContent = modo.value === 'fisico'
-                    ? 'Avaliar dados físicos'
-                    : 'Rolar no site';
+                botaoRolagem.textContent = `Rolar teste de ${opcao.textContent.trim().split(' (')[0]}`;
             }
-            if (camposFisicos) camposFisicos.hidden = modo.value !== 'fisico';
         }
 
         function filtrarAlvos() {
@@ -342,7 +364,6 @@
         dadosExtras.addEventListener('input', atualizarInstrucao);
         kitCheckbox?.addEventListener('change', atualizarInstrucao);
         cicatrizadoCheckbox?.addEventListener('change', atualizarInstrucao);
-        modo.addEventListener('change', atualizarInstrucao);
         filtrarAlvos();
         rolagem.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -359,19 +380,8 @@
                 if (cicatrizadoCheckbox?.checked) {
                     dados.perigo_cicatrizado = cicatrizadoCheckbox.dataset.cicatrizadoDanger;
                 }
-                if (modo.value === 'fisico') {
-                    const valores = dadosFisicos.value.trim().split(/[,\s]+/).filter(Boolean);
-                    if (!valores.length || valores.some((valor) => !/^\d+$/.test(valor))) {
-                        throw new Error('Digite os resultados dos d20 físicos, separados por espaço ou vírgula.');
-                    }
-                    dados.dados_fisicos = valores.map(Number);
-                    const dt = dtInput.value.trim();
-                    dados.dt = dt ? Number(dt) : null;
-                    const { quantidade } = calcularPool();
-                    if (dados.dados_fisicos.length !== quantidade) {
-                        throw new Error(`Este teste exige exatamente ${quantidade} resultado(s) de d20.`);
-                    }
-                }
+                const dt = dtInput?.value.trim();
+                if (dt) dados.dt = Number(dt);
                 const conteudo = await enviar('rolar', dados);
                 const ordem = conteudo.ordem === 'menor' ? 'menor' : 'maior';
                 let resultado = `${conteudo.descricao}: [${conteudo.dados.join(', ')}]; ${ordem} ${conteudo.dado_escolhido} ${conteudo.bonus >= 0 ? '+' : ''}${conteudo.bonus} = ${conteudo.total}.`;
@@ -401,15 +411,6 @@
                     bonus: Number(dadosFormulario.get('bonus')),
                     multiplicador_critico: Number(dadosFormulario.get('multiplicador_critico')),
                 };
-                const modoDano = dadosFormulario.get('modo');
-                if (modoDano === 'fisico') {
-                    const valores = String(dadosFormulario.get('dados_fisicos') || '')
-                        .trim().split(/[,\s]+/).filter(Boolean);
-                    if (!valores.length || valores.some((valor) => !/^\d+$/.test(valor))) {
-                        throw new Error('Digite os resultados físicos separados por espaço ou vírgula.');
-                    }
-                    dados.dados_fisicos = valores.map(Number);
-                }
                 const conteudo = await enviar('dano', dados);
                 resultadoDano.textContent = `${conteudo.descricao}: [${conteudo.dados.join(', ')}]; `
                     + `${conteudo.bonus >= 0 ? '+' : ''}${conteudo.bonus} = ${conteudo.total}.`;
@@ -443,9 +444,10 @@
                 for (const [recurso, maximo] of Object.entries(estado.maximos)) {
                     const saida = document.querySelector(`[data-max="${recurso}"]`);
                     if (saida) saida.textContent = maximo;
+                    if (Object.prototype.hasOwnProperty.call(estado.recursos, recurso)) {
+                        atualizarExcedente(recurso, estado.recursos[recurso], maximo);
+                    }
                 }
-                const pvTemporario = document.querySelector('[data-current="pv_temporario"]');
-                if (pvTemporario) pvTemporario.textContent = estado.pv_temporario;
                 const defesa = document.querySelector('[data-defense]');
                 if (defesa) defesa.textContent = estado.defesa;
                 for (const modificador of estado.alvos_rolagem) {

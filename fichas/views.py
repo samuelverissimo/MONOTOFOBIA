@@ -8,6 +8,7 @@ from django.db import transaction
 from django.db.models import F
 from django.http import HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 from django_ratelimit.decorators import ratelimit
@@ -21,12 +22,14 @@ from .forms import (
     ClasseFichaForm,
     ConceitoFichaForm,
     ConfiguracaoMesaForm,
+    CriacaoInicialForm,
     DanoCombateForm,
     EncontroCombateForm,
     ExposicaoParanormalForm,
     FichaEdicaoForm,
     FichaStatusForm,
     FerimentoDebilitanteForm,
+    HabilidadeFichaForm,
     ItemInventarioAjusteForm,
     ItemInventarioForm,
     PendenciaAtributoForm,
@@ -39,7 +42,6 @@ from .forms import (
     ParticipanteCombateForm,
     RecuperacaoPatenteForm,
     RegistroPrestigioForm,
-    RevisaoFichaForm,
     UsarCicatrizadoForm,
 )
 from .efeitos import explicar_teste
@@ -51,6 +53,7 @@ from .models import (
     Ficha,
     FichaCondicao,
     FerimentoDebilitante,
+    HabilidadeFicha,
     FichaPoder,
     FichaPericia,
     FichaRitual,
@@ -88,7 +91,7 @@ from .regras import (
 )
 
 SESSAO_WIZARD = 'fichas.criacao'
-ETAPAS = ('conceito', 'atributos', 'origem', 'classe', 'pericias', 'revisao')
+ETAPAS = ('conceito', 'atributos', 'origem', 'classe', 'perícias', 'progressão')
 CAMPOS_AUDITAVEIS = (
     'nome', 'jogador', 'conceito', 'aparencia', 'personalidade', 'historia', 'objetivo',
 )
@@ -161,7 +164,9 @@ def _formulario(etapa, request, estado):
         return OrigemFichaForm(form_data, initial=initial, livre=livre)
     if etapa == 4:
         initial = {'classe': dados.get('classe')}
-        return ClasseFichaForm(form_data, initial=initial, livre=livre)
+        return ClasseFichaForm(
+            form_data, initial=initial, livre=livre, mesa=_mesa_configuracao(),
+        )
     if etapa == 5:
         classe = _classe_da_sessao(dados)
         origem = _origem_da_sessao(dados)
@@ -181,7 +186,30 @@ def _formulario(etapa, request, estado):
             livre=livre,
         )
     if etapa == 6:
-        return RevisaoFichaForm(form_data, livre=livre)
+        origem = _origem_da_sessao(dados)
+        pericia_ids = set(dados.get('pericias_escolhidas', []))
+        pericia_ids.update(dados.get('pericias_obrigatorias', []))
+        if origem:
+            pericia_ids.update(origem.pericias_treinadas.values_list('pk', flat=True))
+        initial = {
+            key: value for key, value in dados.items()
+            if key in {
+                'trilha', 'nex_inicial', 'nivel_inicial', 'nex_paranormal',
+                'estagio_inicial', 'patente_inicial', 'cicatrizado_elemento',
+                'cicatrizado_perigo', 'confirmar',
+            } or key.startswith('grau_pericia_')
+        }
+        initial.update(dados.get('graus_pericia', {}))
+        return CriacaoInicialForm(
+            form_data,
+            initial=initial,
+            mesa=_mesa_configuracao(),
+            classe=_classe_da_sessao(dados),
+            origem=origem,
+            atributos=dados.get('atributos', {}),
+            pericia_ids=pericia_ids,
+            livre=livre,
+        )
     return None
 
 
@@ -202,7 +230,22 @@ def _dados_formulario(etapa, form):
             'pericias_escolhidas': [item.pk for item in dados.get('pericias_escolhidas', [])],
         }
     if etapa == 6:
-        return {}
+        return {
+            'trilha': dados['trilha'].pk if dados.get('trilha') else None,
+            'nex_inicial': dados.get('nex_inicial', ''),
+            'nivel_inicial': dados.get('nivel_inicial', ''),
+            'nex_paranormal': dados.get('nex_paranormal', ''),
+            'estagio_inicial': dados.get('estagio_inicial', ''),
+            'patente_inicial': (
+                dados['patente_inicial'].pk if dados.get('patente_inicial') else None
+            ),
+            'cicatrizado_elemento': dados.get('cicatrizado_elemento', ''),
+            'cicatrizado_perigo': dados.get('cicatrizado_perigo', ''),
+            'graus_pericia': {
+                campo: valor for campo, valor in dados.items()
+                if campo.startswith('grau_pericia_')
+            },
+        }
     if etapa == 2:
         return {'atributos': {nome: dados[nome] for nome in ('agilidade', 'forca', 'intelecto', 'presenca', 'vigor')}}
     return dados
@@ -228,41 +271,106 @@ def _criar_ficha(request, estado):
         return None
 
     configuracao = _mesa_configuracao()
+    sobrevivente = bool(classe and classe.slug == 'sobrevivente')
+    dados_iniciais = {
+        **dados.get('graus_pericia', {}),
+        'confirmar': 'on',
+        'trilha': dados.get('trilha') or '',
+        'nex_inicial': dados.get('nex_inicial', ''),
+        'nivel_inicial': dados.get('nivel_inicial', ''),
+        'nex_paranormal': dados.get('nex_paranormal', ''),
+        'estagio_inicial': dados.get('estagio_inicial', ''),
+        'patente_inicial': dados.get('patente_inicial') or '',
+        'cicatrizado_elemento': dados.get('cicatrizado_elemento', ''),
+        'cicatrizado_perigo': dados.get('cicatrizado_perigo', ''),
+    }
+    form_inicial = CriacaoInicialForm(
+        data=dados_iniciais,
+        mesa=configuracao,
+        classe=classe,
+        origem=origem,
+        atributos=atributos,
+        pericia_ids=pericias.keys(),
+        livre=estado['livre'],
+    )
+    if not form_inicial.is_valid():
+        return None
+    iniciais = form_inicial.cleaned_data
+    trilha = iniciais.get('trilha')
+    if configuracao.sistema_progressao == 'patentes' and sobrevivente:
+        return None
+
     usa_nivel_experiencia = configuracao.sistema_progressao == 'nivel_nex'
     usa_patentes = configuracao.sistema_progressao == 'patentes'
-    sobrevivente = bool(classe and classe.slug == 'sobrevivente')
-    if usa_patentes and sobrevivente:
-        return None
+    nex_inicial = None
+    estagio_inicial = None
+    patente_inicial = None
+    nivel_experiencia = None
+    if sobrevivente:
+        estagio_inicial = int(iniciais['estagio_inicial'])
+        if usa_nivel_experiencia:
+            nivel_experiencia = 0
+    elif usa_patentes:
+        patente_inicial = iniciais['patente_inicial']
+    elif usa_nivel_experiencia:
+        if classe:
+            nivel_experiencia = int(iniciais['nivel_inicial'])
+        nex_inicial = 0
+    else:
+        nex_inicial = int(iniciais.get('nex_inicial') or 5)
+
+    nex_calculo = nex_inicial
+    if usa_nivel_experiencia and not sobrevivente:
+        nex_calculo = nex_equivalente_por_nivel(nivel_experiencia)
+    elif patente_inicial:
+        nex_calculo = nex_equivalente_por_nivel(max(1, patente_inicial.limite_pd))
+
     argumentos = {
         **atributos,
-        'nex': None if sobrevivente or usa_patentes else (0 if usa_nivel_experiencia else 5),
-        'estagio': 1 if sobrevivente else None,
+        'nex': None if sobrevivente or usa_patentes else nex_inicial,
+        'estagio': estagio_inicial,
     }
-    nivel_experiencia = (
-        0 if sobrevivente and usa_nivel_experiencia
-        else 1 if classe and usa_nivel_experiencia and not sobrevivente
-        else None
-    )
-    patente_inicial = Patente.objects.filter(slug='recruta').first() if usa_patentes else None
-    if usa_patentes and patente_inicial is None:
-        return None
     if classe:
         slug = classe.slug
         if slug not in ('combatente', 'especialista', 'ocultista', 'sobrevivente'):
             return None
         argumentos.update(
-            pv_atual=calcular_pv_max(slug, vigor=atributos['vigor'], nex=5, estagio=1),
+            pv_atual=calcular_pv_max(
+                slug, vigor=atributos['vigor'], nex=nex_calculo or 5,
+                estagio=estagio_inicial or 1,
+            ),
             pe_atual=0 if configuracao and configuracao.modo_recursos == 'sem_sanidade' else
-            calcular_pe_max(slug, presenca=atributos['presenca'], nex=5, estagio=1),
+            calcular_pe_max(
+                slug, presenca=atributos['presenca'], nex=nex_calculo or 5,
+                estagio=estagio_inicial or 1,
+            ),
             san_atual=0 if configuracao and configuracao.modo_recursos == 'sem_sanidade' else
-            calcular_san_max(slug, nex=5, estagio=1),
+            calcular_san_max(
+                slug, nex=nex_calculo or 5, estagio=estagio_inicial or 1,
+            ),
         )
         if configuracao and configuracao.modo_recursos == 'sem_sanidade':
-            nivel_inicial = patente_inicial.limite_pd if patente_inicial else 1
-            nex_inicial = nex_equivalente_por_nivel(nivel_inicial)
             argumentos['pd_atual'] = calcular_pd_max(
-                slug, presenca=atributos['presenca'], nex=nex_inicial, estagio=1,
+                slug, presenca=atributos['presenca'], nex=nex_calculo or 5,
+                estagio=estagio_inicial or 1,
             )
+
+    pendencias_iniciais = []
+    if classe and sobrevivente:
+        if estagio_inicial and estagio_inicial > 1:
+            pendencias_iniciais = pendencias_ao_subir_estagio(1, estagio_inicial)
+    elif classe and nex_calculo and nex_calculo > 5:
+        pendencias_iniciais = pendencias_ao_subir_nex(
+            classe.slug, 5, nex_calculo, intelecto=atributos['intelecto'],
+        )
+    pendencias_iniciais = [
+        item for item in pendencias_iniciais
+        if not (
+            (item['tipo'] == 'trilha' and trilha is not None)
+            or (item['tipo'] == 'cicatrizado' and iniciais.get('cicatrizado_elemento'))
+            or item['tipo'] == 'treinamento'
+        )
+    ]
 
     with transaction.atomic():
         dono = request.user.__class__.objects.select_for_update().get(pk=request.user.pk)
@@ -279,13 +387,31 @@ def _criar_ficha(request, estado):
             objetivo=dados.get('objetivo', ''),
             classe=classe,
             origem=origem,
+            trilha=trilha,
             patente=patente_inicial,
+            pontos_prestigio=patente_inicial.pontos_prestigio if patente_inicial else 0,
             nivel_experiencia=nivel_experiencia,
+            cicatrizado_elemento=iniciais.get('cicatrizado_elemento', ''),
+            cicatrizado_perigo=iniciais.get('cicatrizado_perigo', ''),
             **argumentos,
         )
         FichaPericia.objects.bulk_create([
-            FichaPericia(ficha=ficha, pericia=pericia, grau='treinado')
+            FichaPericia(
+                ficha=ficha,
+                pericia=pericia,
+                grau=iniciais.get(f'grau_pericia_{pericia.pk}', 'treinado'),
+            )
             for pericia in pericias.values()
+        ])
+        Pendencia.objects.bulk_create([
+            Pendencia(
+                ficha=ficha,
+                tipo=pendencia['tipo'],
+                descricao=pendencia['descricao'],
+                fonte=pendencia['fonte'],
+                quantidade=pendencia.get('quantidade', 1),
+            )
+            for pendencia in pendencias_iniciais
         ])
     return ficha
 
@@ -325,31 +451,8 @@ def _ficha_editavel(request, pk, *, bloquear=False):
 def _aplicar_delta_recurso(ficha, usuario, recurso, delta):
     recursos = {'pv': ('pv_atual', 'ajuste_pv_max'), 'pe': ('pe_atual', 'ajuste_pe_max'),
                 'san': ('san_atual', 'ajuste_san_max'), 'pd': ('pd_atual', 'ajuste_pd_max')}
-    if (
-        type(recurso) is not str or (recurso not in recursos and recurso != 'pv_temporario')
-        or type(delta) is not int or abs(delta) > 1000
-    ):
+    if type(recurso) is not str or recurso not in recursos or type(delta) is not int or abs(delta) > 1000:
         raise ValueError('Alteração de recurso inválida.')
-    if recurso == 'pv_temporario':
-        atual = ficha.pv_temporario
-        novo = max(0, atual + delta)
-        aplicado = novo - atual
-        if novo != atual:
-            ficha.pv_temporario = novo
-            ficha.save(update_fields=('pv_temporario', 'atualizada_em'))
-            LogAlteracao.objects.create(
-                ficha=ficha, usuario=usuario, e_mestre=is_mestre(usuario),
-                campo='pv_temporario', valor_antigo=str(atual), valor_novo=str(novo),
-            )
-        return {
-            'recurso': recurso,
-            'atual': novo,
-            'maximo': None,
-            'aplicado': aplicado,
-            'sobrou': delta - aplicado,
-            'pv_temporario': novo,
-            'pv_temporario_aplicado': 0,
-        }
     configuracao = ConfiguracaoMesa.objects.filter(pk=1).first()
     modo_recursos = configuracao.modo_recursos if configuracao else 'padrao'
     if modo_recursos == 'sem_sanidade' and recurso in ('pe', 'san'):
@@ -359,24 +462,13 @@ def _aplicar_delta_recurso(ficha, usuario, recurso, delta):
     campo, _ = recursos[recurso]
     atual = getattr(ficha, campo)
     maximo = _maximos_ficha(ficha).get(recurso, 0)
-    temporario_aplicado = 0
-    temporario_anterior = ficha.pv_temporario
-    atual_limitado = min(maximo, max(0, atual))
-    correcao_por_limite = atual_limitado - atual
-    if recurso == 'pv' and delta < 0:
-        # PV temporários absorvem o dano antes dos PV; excesso após PV zero não é aplicado.
-        dano = -delta
-        temporario_aplicado = min(temporario_anterior, dano)
-        ficha.pv_temporario -= temporario_aplicado
-        dano -= temporario_aplicado
-        novo = max(0, atual_limitado - dano)
-        pv_aplicado = atual_limitado - novo
-        aplicado = -(temporario_aplicado + pv_aplicado)
-        sobrou = -(dano - pv_aplicado)
-    else:
-        novo = min(maximo, max(0, atual_limitado + delta))
-        aplicado = novo - atual_limitado
-        sobrou = delta - aplicado
+    novo = max(0, atual + delta)
+    aplicado = novo - atual
+    sobrou = delta - aplicado
+    temporario_aplicado = (
+        min(max(0, atual - maximo), max(0, -delta))
+        if recurso == 'pv' else 0
+    )
 
     campos_atualizados = []
     if novo != atual:
@@ -385,13 +477,6 @@ def _aplicar_delta_recurso(ficha, usuario, recurso, delta):
         LogAlteracao.objects.create(
             ficha=ficha, usuario=usuario, e_mestre=is_mestre(usuario),
             campo=campo, valor_antigo=str(atual), valor_novo=str(novo),
-        )
-    if temporario_aplicado:
-        campos_atualizados.append('pv_temporario')
-        LogAlteracao.objects.create(
-            ficha=ficha, usuario=usuario, e_mestre=is_mestre(usuario),
-            campo='pv_temporario', valor_antigo=str(temporario_anterior),
-            valor_novo=str(ficha.pv_temporario),
         )
     if recurso == 'pv' and atual > 0 and novo == 0 and delta < 0:
         for slug, nome, resumo in (
@@ -434,9 +519,8 @@ def _aplicar_delta_recurso(ficha, usuario, recurso, delta):
         'maximo': maximo,
         'aplicado': aplicado,
         'sobrou': sobrou,
-        'correcao_por_limite': correcao_por_limite,
-        'pv_temporario': ficha.pv_temporario if recurso == 'pv' else None,
-        'pv_temporario_aplicado': temporario_aplicado,
+        'temporario': max(0, novo - maximo),
+        'temporario_aplicado': temporario_aplicado,
     }
 
 
@@ -647,7 +731,6 @@ def gerenciar_ferimento(request, pk):
             status=400,
         )
 
-    recurso_pv_anterior = None
     with transaction.atomic():
         ficha = _ficha_editavel(request, pk, bloquear=True)
         mesa = ConfiguracaoMesa.objects.select_for_update().filter(pk=1).first()
@@ -662,9 +745,6 @@ def gerenciar_ferimento(request, pk):
                 ficha=ficha, usuario=request.user, e_mestre=True,
                 campo='ferimento_debilitante', valor_novo=atributo,
             )
-            if atributo == 'vigor':
-                recurso_pv_anterior = ficha.pv_atual
-                ficha.pv_atual = min(ficha.pv_atual, _maximos_ficha(ficha)['pv'])
         else:
             ferimento = get_object_or_404(
                 ficha.ferimentos.select_for_update().filter(curado_em__isnull=True),
@@ -695,16 +775,7 @@ def gerenciar_ferimento(request, pk):
                 )
 
         ficha.versao += 1
-        campos = ['versao', 'atualizada_em']
-        if recurso_pv_anterior is not None:
-            campos.append('pv_atual')
-            if ficha.pv_atual != recurso_pv_anterior:
-                LogAlteracao.objects.create(
-                    ficha=ficha, usuario=request.user, e_mestre=True,
-                    campo='pv_atual', valor_antigo=str(recurso_pv_anterior),
-                    valor_novo=str(ficha.pv_atual),
-                )
-        ficha.save(update_fields=tuple(campos))
+        ficha.save(update_fields=('versao', 'atualizada_em'))
 
     messages.success(request, 'Ferimento Debilitante atualizado.')
     return redirect('fichas:detalhe', pk=pk)
@@ -742,8 +813,6 @@ def rolar_ficha(request, pk):
     dt = conteudo.get('dt')
     if 'dt' in conteudo and dt is not None and (type(dt) is not int or not 1 <= dt <= 1000):
         return JsonResponse({'erro': 'A DT deve ser um inteiro entre 1 e 1000.'}, status=400)
-    if not fisicos and 'dt' in conteudo:
-        return JsonResponse({'erro': 'A DT só pode ser enviada junto dos resultados físicos.'}, status=400)
     with transaction.atomic():
         ficha = _ficha_editavel(request, pk, bloquear=True)
         condicoes_ativas = [
@@ -842,6 +911,9 @@ def rolar_ficha(request, pk):
                     dados_extras=dados_extras,
                     bonus=conteudo['bonus'],
                 )
+                if dt is not None:
+                    resultado['dt'] = dt
+                    resultado['sucesso'] = resultado['total'] >= dt
         except ValueError as erro:
             return JsonResponse({'erro': str(erro)}, status=400)
 
@@ -982,6 +1054,26 @@ def criar_ficha(request, etapa):
     request.session[SESSAO_WIZARD] = estado
     classe = _classe_da_sessao(estado['dados']) if etapa == 6 else None
     origem = _origem_da_sessao(estado['dados']) if etapa == 6 else None
+    progressao_revisao = ''
+    if etapa == 6:
+        if classe and classe.slug == 'sobrevivente':
+            progressao_revisao = (
+                f"Estágio {estado['dados'].get('estagio_inicial', '1')}"
+            )
+        elif _mesa_configuracao().sistema_progressao == 'nivel_nex':
+            progressao_revisao = (
+                f"Nível {estado['dados'].get('nivel_inicial', '1')} · "
+                f"NEX paranormal {estado['dados'].get('nex_paranormal', '0')}%"
+            )
+        elif _mesa_configuracao().sistema_progressao == 'patentes':
+            patente = Patente.objects.filter(
+                pk=estado['dados'].get('patente_inicial'),
+            ).first()
+            progressao_revisao = patente.nome if patente else 'Recruta'
+        else:
+            progressao_revisao = (
+                f"NEX {estado['dados'].get('nex_inicial', '5')}%"
+            )
     return render(request, 'fichas/wizard.html', {
         'form': form,
         'etapa': etapa,
@@ -992,6 +1084,7 @@ def criar_ficha(request, etapa):
             **estado['dados'],
             'classe_nome': classe.nome if classe else 'Sem classe',
             'origem_nome': origem.nome if origem else 'Sem origem',
+            'progressao_nome': progressao_revisao,
         } if etapa == 6 else None,
     })
 
@@ -1000,6 +1093,7 @@ def _contexto_detalhe(
     request, ficha, formulario_avanco=None, formulario_item=None, formulario_estagio=None,
     formulario_ferimento=None, formulario_nivel=None, formulario_exposicao=None,
     formulario_prestigio=None, formulario_recuperacao_patente=None,
+    formulario_habilidade=None,
 ):
     mesa = ConfiguracaoMesa.objects.filter(pk=1).first() or ConfiguracaoMesa()
     ativas = list(ficha.condicoes.select_related(
@@ -1151,13 +1245,21 @@ def _contexto_detalhe(
     )
     if formulario_item is None and pode_editar:
         formulario_item = ItemInventarioForm()
+    if formulario_habilidade is None and pode_editar:
+        formulario_habilidade = HabilidadeFichaForm()
     if formulario_ferimento is None and is_mestre(request.user) and mesa.ferimentos_debilitantes:
         formulario_ferimento = FerimentoDebilitanteForm(ficha=ficha)
     return {
         'ficha': ficha,
+        'ficha_mesas': list(ficha.mesas.order_by('nome', 'pk')),
+        'deslocamento_metros': max(0, 9 + ficha.deslocamento_bonus),
         'ficha_pericias': ficha_pericias,
         'ficha_poderes': ficha.poderes.select_related('poder').order_by('pk'),
         'ficha_rituais': ficha.rituais.select_related('ritual').order_by('pk'),
+        'ficha_habilidades': ficha.habilidades_personalizadas.select_related(
+            'criada_por',
+        ).order_by('criada_em', 'pk'),
+        'formulario_habilidade': formulario_habilidade if pode_editar else None,
         'alvos_rolagem': alvos_rolagem,
         'condicoes_ativas': ativas,
         'condicoes_disponiveis': Condicao.objects.exclude(pk__in=ids_condicoes_ativas).order_by('nome'),
@@ -1207,12 +1309,12 @@ def _contexto_detalhe(
     }
 
 
-def _maximos_ficha(ficha):
+def _maximos_ficha(ficha, mesa=None):
     classe = ficha.classe.slug if ficha.classe_id else None
     maximos = {'pv': 0, 'pe': 0, 'san': 0, 'pd': 0}
     if not classe:
         return maximos
-    mesa = _mesa_configuracao()
+    mesa = mesa or _mesa_configuracao()
     if mesa.sistema_progressao == 'nivel_nex' and classe != 'sobrevivente':
         nivel = ficha.nivel_experiencia or 1
         nex_progressao = nex_equivalente_por_nivel(nivel)
@@ -1242,7 +1344,10 @@ def _maximos_ficha(ficha):
 
 @login_required
 def detalhe_ficha(request, pk):
-    ficha = get_object_or_404(fichas_visiveis_para(request.user), pk=pk)
+    ficha = get_object_or_404(
+        fichas_visiveis_para(request.user).prefetch_related('mesas'),
+        pk=pk,
+    )
     return render(request, 'fichas/detalhe.html', _contexto_detalhe(request, ficha))
 
 
@@ -1313,7 +1418,6 @@ def atualizacoes_ficha(request, pk):
         'modo_recursos': mesa.modo_recursos,
         'recursos': recursos,
         'maximos': maximos,
-        'pv_temporario': ficha.pv_temporario,
         'condicoes': [
             {
                 'id': item.pk,
@@ -1339,6 +1443,12 @@ def atualizacoes_ficha(request, pk):
 @login_required
 def historico_rolagens(request):
     mestre = is_mestre(request.user)
+    if mestre:
+        consulta = request.GET.urlencode()
+        destino = reverse('painel_mestre')
+        if consulta:
+            destino = f'{destino}?{consulta}'
+        return redirect(f'{destino}#historico')
     fichas = fichas_visiveis_para(request.user).select_related('classe').order_by('nome', 'pk')
     rolagens = Rolagem.objects.filter(ficha__in=fichas).select_related(
         'ficha', 'usuario',
@@ -1408,6 +1518,96 @@ def alterar_status_ficha(request, pk):
         )
     messages.success(request, 'Status da ficha atualizado.')
     return redirect('fichas:detalhe', pk=pk)
+
+
+@login_required
+@require_POST
+@ratelimit(key='user', rate='30/h', method='POST', block=True)
+def adicionar_habilidade(request, pk):
+    ficha = _ficha_editavel(request, pk)
+    form = HabilidadeFichaForm(request.POST)
+    if not form.is_valid():
+        return render(
+            request,
+            'fichas/detalhe.html',
+            _contexto_detalhe(request, ficha, formulario_habilidade=form),
+            status=400,
+        )
+    with transaction.atomic():
+        ficha = _ficha_editavel(request, pk, bloquear=True)
+        habilidade = form.save(commit=False)
+        habilidade.ficha = ficha
+        habilidade.criada_por = request.user
+        habilidade.save()
+        LogAlteracao.objects.create(
+            ficha=ficha,
+            usuario=request.user,
+            e_mestre=is_mestre(request.user),
+            campo='habilidade.adicionada',
+            valor_novo=habilidade.nome,
+        )
+    messages.success(request, 'Habilidade adicionada à ficha.')
+    return redirect('fichas:detalhe', pk=pk)
+
+
+@login_required
+@require_POST
+@ratelimit(key='user', rate='60/h', method='POST', block=True)
+def remover_habilidade(request, pk, habilidade_pk):
+    with transaction.atomic():
+        ficha = _ficha_editavel(request, pk, bloquear=True)
+        habilidade = get_object_or_404(
+            HabilidadeFicha.objects.select_for_update(),
+            pk=habilidade_pk,
+            ficha=ficha,
+        )
+        LogAlteracao.objects.create(
+            ficha=ficha,
+            usuario=request.user,
+            e_mestre=is_mestre(request.user),
+            campo='habilidade.removida',
+            valor_antigo=habilidade.nome,
+        )
+        habilidade.delete()
+    messages.success(request, 'Habilidade removida da ficha.')
+    return redirect('fichas:detalhe', pk=pk)
+
+
+@login_required
+@require_POST
+@ratelimit(key='user', rate='10/h', method='POST', block=True)
+def excluir_ficha(request, pk):
+    with transaction.atomic():
+        ficha = get_object_or_404(
+            fichas_visiveis_para(request.user).select_for_update(),
+            pk=pk,
+        )
+        if not pode_editar_ficha(request.user, ficha):
+            raise PermissionDenied
+        nome = ficha.nome
+        encontros_ids = set(
+            ParticipanteCombate.objects.filter(ficha=ficha).values_list('encontro_id', flat=True)
+        )
+        for encontro_id in encontros_ids:
+            encontro = EncontroCombate.objects.select_for_update().get(pk=encontro_id)
+            participantes = list(
+                ParticipanteCombate.objects.select_for_update()
+                .filter(encontro=encontro)
+                .order_by('-iniciativa', 'pk')
+            )
+            participante_removido = next(
+                (indice for indice, item in enumerate(participantes) if item.ficha_id == ficha.pk),
+                None,
+            )
+            if participante_removido is not None:
+                if encontro.indice_turno >= participante_removido:
+                    encontro.indice_turno -= 1
+                encontro.indice_turno = max(-1, encontro.indice_turno)
+                encontro.save(update_fields=('indice_turno', 'atualizado_em'))
+                participantes[participante_removido].delete()
+        ficha.delete()
+    messages.success(request, f'Ficha “{nome}” excluída permanentemente.')
+    return redirect('home')
 
 
 @login_required
@@ -1767,13 +1967,11 @@ def registrar_prestigio(request, pk):
         maximos_anteriores = _maximos_ficha(atual)
         atual.patente = patente_nova
         maximos_novos = _maximos_ficha(atual)
-        pv_novo = min(
-            maximos_novos['pv'],
-            max(0, atual.pv_atual + maximos_novos['pv'] - maximos_anteriores['pv']),
+        pv_novo = max(
+            0, atual.pv_atual + maximos_novos['pv'] - maximos_anteriores['pv'],
         )
-        pd_novo = min(
-            maximos_novos['pd'],
-            max(0, atual.pd_atual + maximos_novos['pd'] - maximos_anteriores['pd']),
+        pd_novo = max(
+            0, atual.pd_atual + maximos_novos['pd'] - maximos_anteriores['pd'],
         )
         atualizados = Ficha.objects.filter(
             pk=pk, versao=form.cleaned_data['versao'],
@@ -2032,9 +2230,6 @@ def usar_cicatrizado(request, pk):
                 messages.error(request, 'Não há PV máximo disponível para sacrificar.')
                 return redirect('fichas:detalhe', pk=pk)
             ficha.ajuste_pv_max -= 1
-            maximo_novo = maximos_antes['pv'] - 1
-            pv_anterior = ficha.pv_atual
-            ficha.pv_atual = min(ficha.pv_atual, maximo_novo)
             campo_ajuste = 'ajuste_pv_max'
             recurso_afetado = 'pv'
         else:
@@ -2047,19 +2242,11 @@ def usar_cicatrizado(request, pk):
                 messages.error(request, 'Não há PE/PD máximo disponível para sacrificar.')
                 return redirect('fichas:detalhe', pk=pk)
             setattr(ficha, campo_ajuste, getattr(ficha, campo_ajuste) - 1)
-            maximo_novo = maximos_antes[recurso_afetado] - 1
-            campo_atual = 'pd_atual' if recurso_afetado == 'pd' else 'pe_atual'
-            recurso_anterior = getattr(ficha, campo_atual)
-            setattr(ficha, campo_atual, min(recurso_anterior, maximo_novo))
 
         ficha.cicatrizado_sessao_usada = mesa.numero_sessao
         campos = [
             campo_ajuste, 'cicatrizado_sessao_usada', 'versao', 'atualizada_em',
         ]
-        if recurso_afetado == 'pv':
-            campos.append('pv_atual')
-        else:
-            campos.append('pd_atual' if recurso_afetado == 'pd' else 'pe_atual')
         ficha.versao += 1
         ficha.save(update_fields=tuple(dict.fromkeys(campos)))
         LogAlteracao.objects.create(
@@ -2078,24 +2265,6 @@ def usar_cicatrizado(request, pk):
             valor_antigo=str(getattr(ficha, campo_ajuste) + 1),
             valor_novo=str(getattr(ficha, campo_ajuste)),
         )
-        if recurso_afetado == 'pv' and ficha.pv_atual != pv_anterior:
-            LogAlteracao.objects.create(
-                ficha=ficha,
-                usuario=request.user,
-                e_mestre=is_mestre(request.user),
-                campo='pv_atual',
-                valor_antigo=str(pv_anterior),
-                valor_novo=str(ficha.pv_atual),
-            )
-        elif recurso_afetado != 'pv' and getattr(ficha, campo_atual) != recurso_anterior:
-            LogAlteracao.objects.create(
-                ficha=ficha,
-                usuario=request.user,
-                e_mestre=is_mestre(request.user),
-                campo=campo_atual,
-                valor_antigo=str(recurso_anterior),
-                valor_novo=str(getattr(ficha, campo_atual)),
-            )
         if efeito == 'reduzir_fisico':
             dano = form.cleaned_data['dano_fisico']
             messages.info(
@@ -2356,6 +2525,8 @@ def editar_ficha(request, pk):
 def configurar_mesa(request):
     if not is_mestre(request.user):
         return HttpResponseForbidden('Somente o mestre pode configurar a mesa.')
+    if request.method == 'GET':
+        return redirect(f'{reverse("painel_mestre")}#configuracao')
     mesa = ConfiguracaoMesa.objects.filter(pk=1).first()
     if mesa is None:
         mesa = ConfiguracaoMesa.objects.create()
@@ -2367,45 +2538,123 @@ def configurar_mesa(request):
             with transaction.atomic():
                 mesa = ConfiguracaoMesa.objects.select_for_update().get(pk=1)
                 if (
-                    form.cleaned_data['sistema_progressao'] != mesa.sistema_progressao
-                    and Ficha.objects.exists()
+                    form.cleaned_data['sistema_progressao'] == 'patentes'
+                    and not Patente.objects.exists()
                 ):
                     form.add_error(
                         'sistema_progressao',
-                        'Não é possível trocar a progressão depois que fichas foram criadas.',
+                        'Carregue o catálogo de patentes antes de ativar essa progressão.',
                     )
-                    return render(
-                        request, 'fichas/configuracao_mesa.html',
-                        {'form': form, 'mesa': mesa}, status=400,
+                if form.errors:
+                    from core.views import contexto_painel_mestre
+
+                    return contexto_painel_mestre(
+                        request, formulario_configuracao=form, status=400,
                     )
-                ativou_ferimentos = (
-                    not mesa.ferimentos_debilitantes
-                    and form.cleaned_data['ferimentos_debilitantes']
+
+                fichas = list(
+                    Ficha.objects.select_for_update().select_related(
+                        'classe', 'patente',
+                    ).order_by('pk')
                 )
+                progresso_anterior = mesa.sistema_progressao
+                progresso_novo = form.cleaned_data['sistema_progressao']
+                progressoes_originais = {
+                    ficha.pk: {
+                        'nex': ficha.nex,
+                        'nivel_experiencia': ficha.nivel_experiencia,
+                        'patente_id': ficha.patente_id,
+                        'patente_nome': ficha.patente.nome if ficha.patente_id else '',
+                    }
+                    for ficha in fichas
+                }
+                for ficha in fichas:
+                    if not ficha.classe_id or ficha.classe.slug == 'sobrevivente':
+                        continue
+                    if ficha.classe.slug not in {
+                        'combatente', 'especialista', 'ocultista',
+                    }:
+                        continue
+                    if progresso_novo == progresso_anterior:
+                        continue
+                    if progresso_anterior == 'nivel_nex':
+                        nivel = ficha.nivel_experiencia or 1
+                    elif progresso_anterior == 'patentes':
+                        nivel = ficha.patente.limite_pd if ficha.patente_id else 1
+                    else:
+                        nivel = max(1, min(20, ((ficha.nex or 5) + 4) // 5))
+                    nivel = max(1, min(20, nivel))
+
+                    if progresso_novo == 'nex':
+                        ficha.nex = nex_equivalente_por_nivel(nivel)
+                        ficha.nivel_experiencia = None
+                        ficha.patente = None
+                    elif progresso_novo == 'nivel_nex':
+                        ficha.nex = 0
+                        ficha.nivel_experiencia = nivel
+                        ficha.patente = None
+                    else:
+                        patente = Patente.objects.filter(
+                            limite_pd__lte=nivel,
+                        ).order_by('-limite_pd', '-pontos_prestigio', 'pk').first()
+                        if patente is None:
+                            patente = Patente.objects.order_by(
+                                'limite_pd', 'pontos_prestigio', 'pk',
+                            ).first()
+                        ficha.nex = None
+                        ficha.nivel_experiencia = None
+                        ficha.patente = patente
+
                 for campo, valor in form.cleaned_data.items():
                     setattr(mesa, campo, valor)
                 mesa.save(update_fields=tuple(form.cleaned_data))
-                if ativou_ferimentos:
-                    fichas_com_ferimento_vigor = Ficha.objects.filter(
-                        ferimentos__atributo='vigor',
-                        ferimentos__curado_em__isnull=True,
-                    ).distinct().select_for_update().order_by('pk')
-                    for ficha in fichas_com_ferimento_vigor:
-                        pv_anterior = ficha.pv_atual
-                        ficha.pv_atual = min(pv_anterior, _maximos_ficha(ficha)['pv'])
-                        if ficha.pv_atual != pv_anterior:
-                            ficha.versao += 1
-                            ficha.save(update_fields=('pv_atual', 'versao', 'atualizada_em'))
+
+                for ficha in fichas:
+                    if not ficha.classe_id or ficha.classe.slug not in {
+                        'combatente', 'especialista', 'ocultista', 'sobrevivente',
+                    }:
+                        continue
+                    alteracoes = []
+                    campos_salvos = []
+                    valores_originais = progressoes_originais[ficha.pk]
+                    campos_progressao = (
+                        ('nex', 'nex'),
+                        ('nivel_experiencia', 'nivel_experiencia'),
+                        ('patente_id', 'patente'),
+                    )
+                    for campo, campo_modelo in campos_progressao:
+                        valor_anterior = valores_originais[campo]
+                        valor_novo = getattr(ficha, campo)
+                        if valor_anterior != valor_novo:
+                            if campo == 'patente_id':
+                                patente_anterior = valores_originais['patente_nome']
+                                patente_nova = ficha.patente.nome if ficha.patente_id else ''
+                                valor_anterior, valor_novo = patente_anterior, patente_nova
+                            alteracoes.append((
+                                campo,
+                                str(valor_anterior),
+                                str(valor_novo),
+                            ))
+                            if campo_modelo not in campos_salvos:
+                                campos_salvos.append(campo_modelo)
+                    if alteracoes:
+                        ficha.versao += 1
+                        campos_salvos.extend(('versao', 'atualizada_em'))
+                        ficha.save(update_fields=tuple(dict.fromkeys(campos_salvos)))
+                        for campo, anterior, novo in alteracoes:
                             LogAlteracao.objects.create(
                                 ficha=ficha,
                                 usuario=request.user,
                                 e_mestre=True,
-                                campo='pv_atual',
-                                valor_antigo=str(pv_anterior),
-                                valor_novo=str(ficha.pv_atual),
+                                campo=f'configuracao.{campo}',
+                                valor_antigo=str(anterior),
+                                valor_novo=str(novo),
                             )
-            messages.success(request, 'Configurações da mesa salvas.')
-            return redirect('fichas:configurar_mesa')
+            messages.success(
+                request,
+                'Configuração salva. A progressão e os recursos das fichas existentes foram adaptados.',
+            )
+            return redirect(f'{reverse("painel_mestre")}#configuracao')
     else:
         form = ConfiguracaoMesaForm(initial={
             'modo_recursos': mesa.modo_recursos,
@@ -2414,7 +2663,9 @@ def configurar_mesa(request):
             'ferimentos_debilitantes': mesa.ferimentos_debilitantes,
             'max_fichas_ativas': mesa.max_fichas_ativas,
         })
-    return render(request, 'fichas/configuracao_mesa.html', {'form': form, 'mesa': mesa})
+    from core.views import contexto_painel_mestre
+
+    return contexto_painel_mestre(request, formulario_configuracao=form, status=400)
 
 
 def _encontro_do_mestre(request, pk, *, bloquear=False):
@@ -2702,9 +2953,9 @@ def aplicar_dano_combate(request, pk, participante_pk):
             ficha, request.user, 'pv', -form.cleaned_data['dano'],
         )
         mensagens = [f"Dano aplicado: {abs(resultado['aplicado'])}."]
-        if resultado['pv_temporario_aplicado']:
+        if resultado['temporario_aplicado']:
             mensagens.append(
-                f"PV temporários absorveram {resultado['pv_temporario_aplicado']}."
+                f"PV temporários absorveram {resultado['temporario_aplicado']}."
             )
         if resultado['sobrou']:
             mensagens.append(f"Excesso não aplicado: {abs(resultado['sobrou'])}.")

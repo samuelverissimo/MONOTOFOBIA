@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Perfil e conta | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<main class="page form-page account-page">
+    <a href="{% url 'home' %}">Voltar às fichas</a>
+    <h1>Perfil e conta</h1>
+    <p class="muted">Tipo de conta atual: <strong>{{ tipo_conta }}</strong>.</p>
+
+    <section class="account-card" aria-labelledby="profile-heading">
+        <h2 id="profile-heading">Informações do perfil</h2>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="acao" value="perfil">
+            {{ form.as_p }}
+            <button class="button" type="submit">Salvar perfil</button>
+        </form>
+    </section>
+
+    <section class="account-card" aria-labelledby="password-heading">
+        <h2 id="password-heading">Alterar senha</h2>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="acao" value="senha">
+            {{ password_form.as_p }}
+            <button class="button" type="submit">Salvar nova senha</button>
+        </form>
+    </section>
+
+    <form method="post" action="{% url 'logout' %}" class="account-logout">
+        {% csrf_token %}
+        <button class="button button-secondary" type="submit">Sair da conta</button>
+    </form>
+</main>
+{% endblock %}

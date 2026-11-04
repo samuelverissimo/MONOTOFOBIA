@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Mesas | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<div class="page">
+    <header class="topbar">
+        <a href="{% url 'home' %}">Voltar às fichas</a>
+        <nav aria-label="Navegação">
+            <a href="{% url 'home' %}">Minhas fichas</a>
+        </nav>
+    </header>
+    <main class="home-content table-page">
+        <h1>Encontrar mesas</h1>
+
+        <section aria-labelledby="join-table-heading">
+            <h2 id="join-table-heading">Inscrever uma ficha</h2>
+            {% if fichas_disponiveis %}
+                <form method="post" action="{% url 'inscrever_ficha_mesa' %}">
+                    {% csrf_token %}
+                    <label for="{{ formulario_inscricao.ficha.id_for_label }}">Ficha</label>
+                    {{ formulario_inscricao.ficha }}
+                    <label for="{{ formulario_inscricao.mesa.id_for_label }}">Mesa pública</label>
+                    {{ formulario_inscricao.mesa }}
+                    <p class="muted">Ou informe o código de 8 dígitos de uma mesa privada.</p>
+                    <label for="{{ formulario_inscricao.codigo_acesso.id_for_label }}">Código privado</label>
+                    {{ formulario_inscricao.codigo_acesso }}
+                    <button class="button" type="submit">Inscrever ficha</button>
+                </form>
+            {% else %}
+                <p>Crie uma ficha ativa antes de se inscrever em uma mesa.</p>
+            {% endif %}
+        </section>
+
+        <section aria-labelledby="available-tables-heading">
+            <h2 id="available-tables-heading">Mesas disponíveis e inscritas</h2>
+            <div class="table-list">
+                {% for mesa in mesas_visiveis %}
+                    <article class="table-card">
+                        <div class="table-card-heading">
+                            <div>
+                                <h3>{{ mesa.nome }}</h3>
+                                <p class="muted">
+                                    {% if mesa.publica %}Pública{% else %}Privada{% endif %}
+                                    · Mestre: {{ mesa.mestre.username }}
+                                </p>
+                            </div>
+                            {% if mestre and mesa.mestre_id == user.pk and not mesa.publica %}
+                                <p class="table-access-code">
+                                    Código de acesso <strong>{{ mesa.codigo_acesso }}</strong>
+                                </p>
+                            {% endif %}
+                        </div>
+                        {% if mesa.pk in mesas_inscritas %}
+                            <h4>Fichas inscritas</h4>
+                            <ul class="table-roster">
+                                {% for inscricao in mesa.inscricoes_visiveis %}
+                                    {% if inscricao.ficha.dono_id == user.pk %}
+                                        <li>
+                                            <span>{{ inscricao.ficha.nome }}</span>
+                                            <form method="post" action="{% url 'remover_inscricao_mesa' mesa.pk inscricao.ficha.pk %}">
+                                                {% csrf_token %}
+                                                <button class="button button-secondary" type="submit">Sair da mesa</button>
+                                            </form>
+                                        </li>
+                                    {% endif %}
+                                {% empty %}
+                                    <li>Nenhuma ficha inscrita.</li>
+                                {% endfor %}
+                            </ul>
+                        {% endif %}
+                    </article>
+                {% empty %}
+                    <p>Nenhuma mesa disponível. O mestre pode criar uma mesa pública ou privada.</p>
+                {% endfor %}
+            </div>
+        </section>
+    </main>
+</div>
+{% endblock %}

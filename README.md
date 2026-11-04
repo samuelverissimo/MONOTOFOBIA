@@ -54,14 +54,14 @@ Mantenha os PDFs e os textos extraídos localmente; eles são ignorados pelo Git
 O usuário `admin` criado para desenvolvimento anteriormente usa uma senha temporária conhecida. Troque-a com `python manage.py changepassword admin` e não reutilize essa conta/senha em produção.
 
 Durante a sessão presencial, a ficha prioriza instruir o teste, detalhar os modificadores linha a linha e avaliar os resultados dos d20 rolados fisicamente; a rolagem digital é opcional.
-Na ficha, ajuste PV, PE, SAN/PD e PV temporários com −5/−1/+1/+5 ou informe um ajuste numérico. O modo sessão pode ampliar o texto e o contraste; a tela acesa depende do suporte do navegador a Screen Wake Lock.
+Na ficha, ajuste PV, PE, SAN/PD com −5/−1/+1/+5 ou informe um ajuste numérico. Ao passar do máximo, o excedente fica temporário no próprio recurso e é consumido primeiro; não há um painel separado de PV temporários. O modo sessão pode ampliar o texto e o contraste; a tela acesa depende do suporte do navegador a Screen Wake Lock.
 Para combate, Luta/Pontaria podem ser comparadas à Defesa informada como DT; uma ferramenta de dano avalia dados físicos e mantém o rolamento digital como alternativa. O mestre pode aplicar dano informado fisicamente à ficha selecionada na cena.
 O painel do mestre também registra cenas, Iniciativa física, ordem de turnos, surpresa, ações e reações defensivas, gastos de PE/PD dentro dos limites por turno e condições em grupo; a ficha lembra Morrendo e permite registrar estabilização. É um controle leve, sem mapa tático ou resolução automática de ataques.
 Condições e sobrecarga atualizam os modificadores numéricos exibidos para testes e Defesa; consulte os resumos na ficha para efeitos situacionais que dependem do contexto.
-O mestre pode resolver escolhas pendentes e avançar Sobreviventes por estágio; escolhas não disponíveis nos catálogos podem ser anotadas como opções personalizadas curtas.
+Na criação, escolha o nível/NEX/estágio/patente disponível para a configuração da mesa, defina graus das perícias e escolha trilhas apenas quando os pré-requisitos estruturados forem atendidos. O mestre pode resolver escolhas pendentes e avançar Sobreviventes por estágio; escolhas não disponíveis nos catálogos podem ser anotadas como opções personalizadas curtas.
 O estágio 5 registra Cicatrizado e a ficha aplica a penalidade em testes de resistência contra o perigo escolhido; o mestre controla a sessão pelo painel.
 Ferimentos Debilitantes são opcionais; o mestre os ativa nas configurações e registra efeito, tratamento e cura na ficha. O gatilho de dano massivo permanece manual.
-Antes de criar fichas, o mestre escolhe a progressão da campanha: NEX, Nível de Experiência e Exposição, ou Patentes. A progressão por patentes exige modo Sem Sanidade (PV/PD), registra prestígio por missão e aplica promoções/recuperação conforme o suplemento. A escolha fica bloqueada depois da primeira ficha.
+O mestre escolhe a progressão da campanha: NEX, Nível de Experiência e Exposição, ou Patentes. A progressão por patentes exige modo Sem Sanidade (PV/PD), registra prestígio por missão e aplica promoções/recuperação conforme o suplemento. A configuração pode ser alterada depois da criação das fichas.
 
 ## Ligar e desligar o servidor
 

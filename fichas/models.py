@@ -85,6 +85,11 @@ class Classe(CatalogoBase):
 class Trilha(CatalogoBase):
     classe = models.ForeignKey(Classe, on_delete=models.PROTECT, related_name='trilhas')
     habilidades = models.JSONField(default=list, blank=True)
+    pre_requisitos = models.JSONField(default=dict, blank=True)
+
+    def clean(self):
+        super().clean()
+        validar_pre_requisitos(self.pre_requisitos)
 
 
 class Poder(CatalogoBase):
@@ -255,7 +260,6 @@ class Ficha(models.Model):
     pe_atual = models.PositiveIntegerField(default=0)
     san_atual = models.PositiveIntegerField(default=0)
     pd_atual = models.PositiveIntegerField(default=0)
-    pv_temporario = models.PositiveIntegerField(default=0)
     ajuste_pv_max = models.SmallIntegerField(default=0)
     ajuste_pe_max = models.SmallIntegerField(default=0)
     ajuste_san_max = models.SmallIntegerField(default=0)
@@ -341,6 +345,20 @@ class FichaRitual(models.Model):
     nome_personalizado = models.CharField(max_length=120, blank=True)
     resumo_personalizado = models.CharField(max_length=500, blank=True)
     fonte = models.CharField(max_length=100, default='Personalizado')
+
+
+class HabilidadeFicha(models.Model):
+    ficha = models.ForeignKey(Ficha, on_delete=models.CASCADE, related_name='habilidades_personalizadas')
+    nome = models.CharField(max_length=120)
+    descricao = models.CharField(max_length=1000)
+    criada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='habilidades_ficha_criadas',
+    )
+    criada_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('criada_em', 'pk')
 
 
 class FichaCondicao(models.Model):

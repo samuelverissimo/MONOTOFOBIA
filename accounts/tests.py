@@ -114,6 +114,102 @@ class RegistrationTests(TestCase):
 		self.assertNotContains(response, 'nome de usuário incorreto')
 
 
+class AccountProfileTests(TestCase):
+	def setUp(self):
+		cache.clear()
+		self.password = get_random_string(32)
+		self.user = User.objects.create_user(
+			username='profile-user',
+			email='profile@example.com',
+			password=self.password,
+		)
+		self.client.force_login(self.user)
+
+	def test_profile_updates_name_username_and_email_without_granting_role(self):
+		response = self.client.post(reverse('account_profile'), {
+			'acao': 'perfil',
+			'nome': 'Samara',
+			'username': 'profile-user-new',
+			'email': 'new@example.com',
+			'tipo_conta': 'mestre',
+		})
+
+		self.assertRedirects(response, reverse('account_profile'))
+		self.user.refresh_from_db()
+		self.assertEqual(
+			(self.user.first_name, self.user.username, self.user.email),
+			('Samara', 'profile-user-new', 'new@example.com'),
+		)
+		self.assertFalse(self.user.is_superuser)
+		self.assertFalse(self.user.is_staff)
+
+	def test_profile_can_change_password_without_ending_session(self):
+		new_password = get_random_string(32)
+		response = self.client.post(reverse('account_profile'), {
+			'acao': 'senha',
+			'old_password': self.password,
+			'new_password1': new_password,
+			'new_password2': new_password,
+		})
+
+		self.assertRedirects(response, reverse('account_profile'))
+		self.user.refresh_from_db()
+		self.assertTrue(self.user.check_password(new_password))
+		self.assertEqual(self.client.get(reverse('account_profile')).status_code, 200)
+
+	def test_last_superuser_cannot_demote_and_player_cannot_promote(self):
+		master = User.objects.create_superuser(
+			username='last-master', email='last-master@example.com',
+			password=get_random_string(32),
+		)
+		self.client.force_login(master)
+		response = self.client.post(reverse('account_profile'), {
+			'acao': 'perfil',
+			'nome': '',
+			'username': master.username,
+			'email': master.email,
+			'tipo_conta': 'jogador',
+		})
+		self.assertEqual(response.status_code, 400)
+		master.refresh_from_db()
+		self.assertTrue(master.is_superuser)
+
+		self.client.force_login(self.user)
+		response = self.client.post(reverse('account_profile'), {
+			'acao': 'perfil',
+			'nome': '',
+			'username': self.user.username,
+			'email': self.user.email,
+			'tipo_conta': 'mestre',
+		})
+		self.assertEqual(response.status_code, 302)
+		self.user.refresh_from_db()
+		self.assertFalse(self.user.is_superuser)
+
+	def test_master_can_demote_self_only_when_another_master_remains(self):
+		master = User.objects.create_superuser(
+			username='first-master', email='first-master@example.com',
+			password=get_random_string(32),
+		)
+		User.objects.create_superuser(
+			username='second-master', email='second-master@example.com',
+			password=get_random_string(32),
+		)
+		self.client.force_login(master)
+		response = self.client.post(reverse('account_profile'), {
+			'acao': 'perfil',
+			'nome': '',
+			'username': master.username,
+			'email': master.email,
+			'tipo_conta': 'jogador',
+		})
+
+		self.assertRedirects(response, reverse('account_profile'))
+		master.refresh_from_db()
+		self.assertFalse(master.is_superuser)
+		self.assertEqual(User.objects.filter(is_superuser=True).count(), 1)
+
+
 class AxesLockoutTests(TestCase):
 	def setUp(self):
 		AccessAttempt.objects.all().delete()

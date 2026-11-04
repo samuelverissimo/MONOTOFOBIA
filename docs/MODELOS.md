@@ -28,8 +28,8 @@ O acesso deve filtrar fichas por dono ou mestre usando `fichas.permissions`; vie
 
 ## Fundações da Fase 0
 
-- `Ficha.pv_temporario` é consumido antes de PV ao registrar dano. A operação limita recursos a zero/máximo, informa aplicado e excedente e grava no `LogAlteracao` cada valor que mudou.
-- Ajustes manuais de recursos aceitam incrementos de até 1000 por chamada; PV temporários não podem ficar negativos, são auditados em `LogAlteracao` e seguem no polling autenticado. A tela de sessão e o Screen Wake Lock são controles client-side, sem preferência persistida no modelo de usuário.
+- Os excedentes de PV, PE, SAN e PD são derivados do valor atual acima do máximo; dano consome primeiro o excedente de PV. Ajustes limitam os recursos apenas a zero, informam aplicado e excedente e gravam no `LogAlteracao` cada valor que mudou.
+- Ajustes manuais de recursos aceitam incrementos de até 1000 por chamada; PV, PE, SAN e PD não podem ficar negativos, mas podem exceder o máximo, sendo esse excedente temporário. Os valores são auditados em `LogAlteracao` e seguem no polling autenticado. PV temporários legados são somados a `pv_atual` pela migration 0016.
 - A autorização de edição mantém a separação por dono/mestre. Uma ficha inativa é somente leitura para o dono nos fluxos que alteram recursos, condições, rolagens, inventário, progressão NEX/estágio e campos da ficha; o mestre pode editar e toda mudança de ficha permanece auditada.
 - `Rolagem` guarda resultados de dados físicos informados pelo jogador ou de rolagem digital. O histórico filtra rolagens secretas para jogadores e o painel de mestre é separado; não foi necessário distinguir a origem do resultado com uma coluna.
 - O cálculo de dano usa `Rolagem`: dados e multiplicador crítico são validados, resultados físicos são avaliados no servidor e o bônus é aplicado uma única vez. No painel exclusivo do mestre, o dano físico informado pode ser aplicado a um participante com ficha vinculada, usando o controle e a auditoria de PV existentes; não há resolução automática de ataques ou alvos.
