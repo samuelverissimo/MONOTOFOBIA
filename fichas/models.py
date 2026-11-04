@@ -5,6 +5,7 @@ from django.db import models
 from django.db.models import Q
 
 from .regras import CAMPOS_EFEITOS_CONDICAO
+from .pre_requisitos import validar_pre_requisitos
 
 RESUMO_VALIDATORS = [MaxLengthValidator(500)]
 
@@ -98,6 +99,10 @@ class Poder(CatalogoBase):
     tipo = models.CharField(max_length=12, choices=TIPOS)
     pre_requisitos = models.JSONField(default=dict, blank=True)
     custo = models.CharField(max_length=80, blank=True)
+
+    def clean(self):
+        super().clean()
+        validar_pre_requisitos(self.pre_requisitos)
 
 
 class Ritual(CatalogoBase):

@@ -17,7 +17,7 @@
 - Painel do mestre atualiza a cada 5 segundos e permite aplicar uma condição a até 50 fichas ativas selecionadas. A ação é exclusiva do mestre, rate-limited e auditada por ficha; fichas inativas e IDs inválidos não são aceitos.
 - Histórico de rolagens paginado e filtrável por ficha visível; jogadores não recebem rolagens secretas nem conseguem consultar fichas alheias, enquanto o mestre pode consultar todas.
 - Polling autenticado da ficha a cada 30 segundos, pausado quando a página não está visível; atualiza recursos, máximos e condições sem expor anotações ou recursos ocultos pelo modo da mesa.
-- Condições exibem resumo mecânico e aplicam efeitos numéricos catalogados em testes e Defesa. Escaladas substituem a condição ativa e geram auditoria; efeitos que dependem do alvo/ação são informativos.
+- Condições exibem resumo mecânico e aplicam efeitos numéricos catalogados em testes e Defesa. Escaladas substituem a condição ativa e geram auditoria; efeitos que dependem do alvo/ação são informativos. Ao encerrar combate, condições marcadas para terminar com a cena são removidas e auditadas; as persistentes permanecem.
 - Cicatrizado do Sobrevivente é registrado como pendência no estágio 5. A ficha lembra o perigo e aplica −1 dado somente quando o jogador identifica um teste de resistência contra esse perigo; a reação é limitada à sessão corrente e o mestre reinicia a sessão pelo painel.
 - Testes aplicam automaticamente penalidade de sobrecarga às perícias indicadas no catálogo e perguntam se o kit necessário está disponível; a resposta do servidor calcula ambos os modificadores.
 - Requisitos de desenvolvimento separados dos utilitários de PDF; CI sem dependências PDF, com verificação de migrações e `check --deploy` em ambiente simulado.
@@ -38,6 +38,8 @@ O comando `python manage.py carregar_regras` carrega JSONs locais em uma transa�
 | Origens do suplemento | 20 | SaH pp.7-13 |
 
 Todos os registros têm `fonte`, `slug` e indicação de `personalizado`. Os resumos são mecânicos e curtos, escritos para a ficha; nenhum capítulo ou bloco longo dos livros foi copiado.
+
+O campo `Poder.pre_requisitos` agora valida e aplica um schema neutro e cumulativo: `classe_slug`, `trilha_slug`, `nex_min`, `estagio_min`, `atributos_min`, `pericias_treinadas` e `poderes`. O seletor de progressão só oferece poderes cujos requisitos a ficha satisfaz; a validação é repetida no POST com a ficha bloqueada. O carregador rejeita campos desconhecidos e valores fora do formato. Os JSONs continuam sem entradas de livro; a implementação do schema não inclui requisitos derivados de conteúdo licenciado.
 
 ## Conferências realizadas
 

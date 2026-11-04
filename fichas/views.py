@@ -2082,7 +2082,7 @@ def _formulario_pendencia(request, ficha, pendencia):
     if pendencia.tipo == 'trilha':
         return PendenciaTrilhaForm(ficha=ficha, **kwargs)
     if pendencia.tipo in ('poder', 'versatilidade'):
-        return PendenciaPoderForm(**kwargs)
+        return PendenciaPoderForm(ficha=ficha, **kwargs)
     if pendencia.tipo == 'ritual':
         return PendenciaRitualForm(
             nivel_nex=(
@@ -2773,6 +2773,20 @@ def encerrar_encontro_combate(request, pk):
             LogAlteracao.objects.create(
                 ficha=ficha_condicao.ficha, usuario=request.user, e_mestre=True,
                 campo='combate.turnos_morrendo', valor_antigo=str(anterior), valor_novo='0',
+            )
+        condicoes_fim_cena = FichaCondicao.objects.select_for_update().filter(
+            ficha__participacoes_combate__encontro=encontro,
+            condicao__termina_fim_cena=True,
+        ).select_related('ficha', 'condicao')
+        for ficha_condicao in condicoes_fim_cena:
+            ficha_condicao.delete()
+            LogAlteracao.objects.create(
+                ficha=ficha_condicao.ficha,
+                usuario=request.user,
+                e_mestre=True,
+                campo='condicao',
+                valor_antigo=ficha_condicao.condicao.nome,
+                valor_novo='',
             )
         encontro.ativo = False
         encontro.save(update_fields=('ativo', 'atualizado_em'))

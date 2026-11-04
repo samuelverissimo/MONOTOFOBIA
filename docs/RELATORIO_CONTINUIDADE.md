@@ -89,7 +89,7 @@ Para Linux/macOS, ative com `source .venv/bin/activate`; os demais comandos Djan
 ## Lacunas e próximos passos
 
 1. Continuar curadoria dos catálogos de trilhas, poderes, rituais, itens, armas e proteções. Os JSONs novos estão vazios; inserir apenas dados concisos, revisados e próprios/autorizados. O repositório GitHub é público.
-2. O limite cumulativo de PD por turno da patente é exibido, mas não imposto: o rastreador não registra gastos de PD por turno. Modelar gastos em ações e reações antes de impor o limite e considerar a exceção de custo mínimo descrita em OPRPG p.23.
+2. O rastreador agora contabiliza gastos de PE/PD por turno e impõe os limites de progressão/patente. Ainda falta conferir a regra completa de custo mínimo e exceções com fontes autorizadas antes de automatizá-las.
 3. Combate continua assistido, não automatizado: sem mapa, alcance, resolução de ataques, aplicação automática de dano ou validação de reações; o mestre informa dano físico já calculado. O gatilho de dano massivo também é manual.
 4. Fazer validação visual de interface mobile/acessibilidade em aparelho real.
 5. Continuar cobrindo autorização/IDOR, concorrência, limites de taxa, auditoria, mudanças de configuração e fluxos de combate; não afirmar segurança absoluta.
@@ -120,6 +120,14 @@ O relatório foi comparado com as views, modelos, templates, JSONs e testes atua
 - Na execução desta sessão, `migrate` aplicou as migrations `fichas.0006`–`0011`, que estavam pendentes. O banco SQLite local foi limpo a pedido do proprietário, o comando `carregar_regras` foi executado e a conta mestre `samukamestre` foi criada. Nenhuma senha foi registrada neste documento. Não extrapolar esse estado local para produção.
 - Validação final deste grupo: `check` sem problemas; `makemigrations --check --dry-run` sem alterações; **99 testes passaram**; Bandit sem achados; pip-audit sem vulnerabilidades conhecidas; `git diff --check` sem erros. A interface de login foi aberta no navegador local e `ficha.js` foi carregado com sucesso; a validação visual em aparelhos reais continua pendente.
 
+## Atualização em 2026-11-04 — avanço das fases parciais
+
+- Ao encerrar uma cena de combate, condições com `termina_fim_cena=True` agora são removidas das fichas participantes e cada remoção gera auditoria; condições persistentes permanecem. A regra usa o sinalizador já existente no catálogo, sem inferir duração para condições sem metadados.
+- O teste focal confirma remoção, preservação e auditoria. As próximas lacunas continuam sendo os catálogos autorizados, efeitos contextuais/durações ainda não modelados e automações de combate que dependem de regras ou decisões do mestre.
+- O campo de pré-requisitos de Poder ganhou um schema estruturado, validação no carregador, filtragem das opções por classe/trilha/progressão/atributos/perícias/poderes e revalidação no servidor. Nenhum dado de catálogo de livros foi criado; os arquivos seguem vazios enquanto não houver curadoria autorizada.
+- A validação local do PWA confirmou cache somente de CSS, ícone, manifesto e página offline genérica; navegando sem conexão, o login/home privados não foram armazenados e foi apresentada a tela de reconexão.
+- Validação deste avanço: **110 testes passaram**, `check` e migrações sem problemas, Gitleaks e Bandit sem achados, pip-audit sem vulnerabilidades conhecidas e `git diff --check` sem erros.
+
 ## Atualização em 2026-11-04 — grupo 3 (fases 7–9)
 
 - O inventário manual já permitia cadastrar equipamento na ficha, sem precisar replicar um catálogo licenciado. O catálogo de equipamentos/armas/proteções continua pendente de curadoria autorizada; nenhum conteúdo de livro foi adicionado.
@@ -133,5 +141,5 @@ O relatório foi comparado com as views, modelos, templates, JSONs e testes atua
 - O site ganhou manifesto PWA e service worker com escopo de raiz. O cache mantém somente recursos estáticos; páginas autenticadas, APIs e dados da campanha nunca são armazenados. Sem conexão, o service worker serve uma página genérica que pede reconexão. `STATIC_URL` foi normalizado para caminho absoluto para que assets funcionem também em rotas aninhadas.
 - A revisão de contas confirmou cadastro com normalização NFKC, nomes reservados, e-mail único sem distinção de caixa, Argon2, validação de senha e rate limit; o login usa mensagem genérica e bloqueio após falhas repetidas. Os testes existentes cobrem esses controles, portanto não foi necessário alterar o fluxo de contas.
 - Revisão final: **106 testes passaram**, `check` sem problemas, `makemigrations --check --dry-run` sem alterações, Bandit sem achados, pip-audit sem vulnerabilidades conhecidas, `findstatic` localizou os três assets PWA e `git diff --check` sem erros.
-- Limitações finais: instalação e funcionamento offline ainda requerem validação visual em aparelho/navegador real e HTTPS; a página offline não disponibiliza dados da mesa. Catálogos licenciados continuam vazios até curadoria autorizada, ameaças não têm controle automatizado de PV/dano e deploy real não foi testado.
+- Limitações finais: a página offline não disponibiliza dados da mesa. Catálogos licenciados continuam vazios até curadoria autorizada, ameaças não têm controle automatizado de PV/dano e deploy real não foi testado. Uma verificação posterior em navegador integrado confirmou registro do service worker, ausência de overflow horizontal em viewport de 390 px e fallback offline; validação em aparelho real e HTTPS de produção ainda falta.
 - Nenhum commit ou push foi feito. O banco SQLite local recebeu somente as migrations aditivas deste grupo e permanece distinto de produção.

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
@@ -16,6 +17,7 @@ from fichas.models import (
     Ritual,
     Trilha,
 )
+from fichas.pre_requisitos import validar_pre_requisitos
 
 
 DATA_DIR = Path(__file__).resolve().parents[2] / 'dados'
@@ -116,6 +118,13 @@ class Command(BaseCommand):
             }),
         ):
             for registro in self._ler(arquivo):
+                if modelo is Poder:
+                    try:
+                        validar_pre_requisitos(registro.get('pre_requisitos', {}))
+                    except ValidationError as erro:
+                        raise CommandError(
+                            f"Pré-requisitos inválidos para o poder {registro['slug']}."
+                        ) from erro
                 _, criado = self._atualizar(modelo, registro, campos=campos)
                 contagens['criados' if criado else 'atualizados'] += 1
 

@@ -1,8 +1,7 @@
 from django import forms
-
-from core.models import AmeacaMesa
 from django.core.exceptions import ValidationError
 
+from core.models import AmeacaMesa
 from fichas.models import (
     Classe,
     ConfiguracaoMesa,
@@ -19,6 +18,7 @@ from fichas.models import (
     Ritual,
     Trilha,
 )
+from fichas.pre_requisitos import poder_atende_pre_requisitos
 from fichas.regras import ATRIBUTOS, NEX_VALIDOS, pericias_treinadas_disponiveis, validar_atributos_iniciais
 
 
@@ -553,6 +553,9 @@ class PendenciaPoderForm(forms.Form):
         queryset=Poder.objects.none(),
         label='Poder do catálogo (opcional)',
         required=False,
+        error_messages={
+            'invalid_choice': 'Este poder não atende aos pré-requisitos desta ficha.',
+        },
     )
     nome_personalizado = forms.CharField(label='Nome', max_length=120, required=False)
     resumo_personalizado = forms.CharField(
@@ -562,12 +565,36 @@ class PendenciaPoderForm(forms.Form):
         widget=forms.Textarea(attrs={'rows': 3}),
     )
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, ficha, **kwargs):
+        self.ficha = ficha
         super().__init__(*args, **kwargs)
-        self.fields['poder'].queryset = Poder.objects.order_by('nome')
+        pericias_treinadas = set(
+            ficha.pericias.exclude(grau='destreinado').values_list(
+                'pericia__slug', flat=True,
+            )
+        )
+        poderes_escolhidos = set(
+            ficha.poderes.filter(poder__isnull=False).values_list('poder__slug', flat=True)
+        )
+        disponiveis = [
+            poder.pk
+            for poder in Poder.objects.order_by('nome')
+            if poder_atende_pre_requisitos(
+                poder,
+                ficha,
+                pericias_treinadas=pericias_treinadas,
+                poderes_escolhidos=poderes_escolhidos,
+            )
+        ]
+        self.fields['poder'].queryset = Poder.objects.filter(pk__in=disponiveis).order_by('nome')
 
     def clean(self):
         dados = super().clean()
+        poder = dados.get('poder')
+        if poder and not poder_atende_pre_requisitos(poder, self.ficha):
+            self.add_error('poder', ValidationError(
+                'A ficha não atende aos pré-requisitos estruturados deste poder.',
+            ))
         if not dados.get('poder') and not (dados.get('nome_personalizado') and dados.get('resumo_personalizado')):
             raise ValidationError('Escolha um poder do catálogo ou informe nome e resumo mecânico curto.')
         return dados

@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import Client, SimpleTestCase, TestCase
@@ -851,6 +852,49 @@ class FichaViewsTests(TestCase):
             ficha=self.ficha, campo='status', valor_novo='morta',
         ).exists())
 
+    def test_ending_encounter_removes_end_of_scene_conditions_and_preserves_others(self):
+        expires = Condicao.objects.create(
+            nome='Condição até o fim da cena',
+            slug='condicao-fim-cena',
+            fonte='Personalizado',
+            resumo='',
+            termina_fim_cena=True,
+        )
+        persists = Condicao.objects.create(
+            nome='Condição persistente',
+            slug='condicao-persistente',
+            fonte='Personalizado',
+            resumo='',
+            termina_fim_cena=False,
+        )
+        FichaCondicao.objects.create(ficha=self.ficha, condicao=expires)
+        FichaCondicao.objects.create(ficha=self.ficha, condicao=persists)
+        self.client.force_login(self.master)
+        encontro = EncontroCombate.objects.create(criado_por=self.master, nome='Cena de teste')
+        ParticipanteCombate.objects.create(
+            encontro=encontro, ficha=self.ficha, nome=self.ficha.nome, iniciativa=10,
+        )
+
+        response = self.client.post(
+            reverse('fichas:encerrar_encontro_combate', kwargs={'pk': encontro.pk}),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(FichaCondicao.objects.filter(
+            ficha=self.ficha, condicao=expires,
+        ).exists())
+        self.assertTrue(FichaCondicao.objects.filter(
+            ficha=self.ficha, condicao=persists,
+        ).exists())
+        self.assertTrue(LogAlteracao.objects.filter(
+            ficha=self.ficha,
+            campo='condicao',
+            valor_antigo=expires.nome,
+            valor_novo='',
+        ).exists())
+        encontro.refresh_from_db()
+        self.assertFalse(encontro.ativo)
+
     def test_roll_applies_condition_load_and_missing_kit_modifiers(self):
         self.client.force_login(self.owner)
         self.luta.penalidade_carga = True
@@ -1105,6 +1149,66 @@ class FichaViewsTests(TestCase):
         self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
         self.assertEqual(FichaRitual.objects.get(ficha=self.ficha).nome_personalizado, 'Ritual próprio')
         self.assertTrue(Pendencia.objects.get(pk=ritual.pk).resolvida)
+
+    def test_power_catalog_prerequisites_are_validated_for_current_sheet(self):
+        self.ficha.intelecto = 3
+        self.ficha.save(update_fields=('intelecto',))
+        FichaPericia.objects.create(ficha=self.ficha, pericia=self.luta, grau='treinado')
+        available = Poder.objects.create(
+            nome='Poder elegível',
+            slug='poder-elegivel',
+            fonte='Personalizado',
+            resumo='',
+            tipo='geral',
+            pre_requisitos={
+                'classe_slug': 'combatente',
+                'nex_min': 5,
+                'atributos_min': {'intelecto': 3},
+                'pericias_treinadas': ['luta'],
+            },
+        )
+        unavailable = Poder.objects.create(
+            nome='Poder indisponível',
+            slug='poder-indisponivel',
+            fonte='Personalizado',
+            resumo='',
+            tipo='geral',
+            pre_requisitos={'nex_min': 10},
+        )
+        pending = Pendencia.objects.create(
+            ficha=self.ficha, tipo='poder', descricao='Escolher poder.',
+            fonte='Personalizado',
+        )
+        self.client.force_login(self.owner)
+        url = reverse(
+            'fichas:resolver_pendencia',
+            kwargs={'pk': self.ficha.pk, 'pendencia_pk': pending.pk},
+        )
+
+        response = self.client.get(url)
+        self.assertContains(response, available.nome)
+        self.assertNotContains(response, unavailable.nome)
+        response = self.client.post(url, {'poder': unavailable.pk})
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(FichaPoder.objects.filter(ficha=self.ficha).exists())
+        self.assertFalse(Pendencia.objects.get(pk=pending.pk).resolvida)
+
+        response = self.client.post(url, {'poder': available.pk})
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.assertEqual(FichaPoder.objects.get(ficha=self.ficha).poder, available)
+        self.assertTrue(Pendencia.objects.get(pk=pending.pk).resolvida)
+
+    def test_power_prerequisite_schema_rejects_unknown_fields_and_boolean_numbers(self):
+        poder = Poder(
+            nome='Poder inválido',
+            slug='poder-invalido',
+            fonte='Personalizado',
+            resumo='',
+            tipo='geral',
+            pre_requisitos={'nex_min': True, 'campo_desconhecido': 'valor'},
+        )
+        with self.assertRaises(ValidationError):
+            poder.full_clean()
 
     def test_learning_ritual_in_experience_mode_increases_exposure_by_circle(self):
         mesa = ConfiguracaoMesa.objects.create(sistema_progressao='nivel_nex')
@@ -2029,7 +2133,9 @@ class CarregarRegrasTests(TestCase):
                 }],
                 'poderes.json': [{
                     'slug': 'poder-teste', 'nome': 'Poder de teste', 'fonte': 'teste',
-                    'resumo': '', 'tipo': 'geral', 'pre_requisitos': {}, 'custo': '',
+                    'resumo': '', 'tipo': 'geral',
+                    'pre_requisitos': {'classe_slug': 'sobrevivente', 'estagio_min': 2},
+                    'custo': '',
                 }],
                 'rituais.json': [{
                     'slug': 'ritual-teste', 'nome': 'Ritual de teste', 'fonte': 'teste',
@@ -2052,5 +2158,34 @@ class CarregarRegrasTests(TestCase):
         self.assertEqual(Trilha.objects.get(slug='trilha-teste').classe.slug, 'sobrevivente')
         self.assertEqual(Trilha.objects.count(), 1)
         self.assertEqual(Poder.objects.count(), 1)
+        self.assertEqual(
+            Poder.objects.get(slug='poder-teste').pre_requisitos,
+            {'classe_slug': 'sobrevivente', 'estagio_min': 2},
+        )
         self.assertEqual(Ritual.objects.count(), 1)
         self.assertEqual(ItemCatalogo.objects.count(), 1)
+
+    def test_loader_rejects_unrecognized_power_prerequisite_fields_atomically(self):
+        arquivos = (
+            'atributos.json', 'pericias.json', 'classes.json', 'patentes.json',
+            'origens_oprgp.json', 'origens_sah.json', 'condicoes.json', 'trilhas.json',
+            'rituais.json', 'itens_oprgp.json', 'itens_sah.json',
+        )
+        with TemporaryDirectory() as diretorio:
+            pasta = Path(diretorio)
+            for arquivo in arquivos:
+                (pasta / arquivo).write_text('[]', encoding='utf-8')
+            (pasta / 'poderes.json').write_text(json.dumps([{
+                'slug': 'poder-invalido',
+                'nome': 'Poder inválido',
+                'fonte': 'teste',
+                'resumo': '',
+                'tipo': 'geral',
+                'pre_requisitos': {'exigencia_desconhecida': 'valor'},
+            }]), encoding='utf-8')
+
+            with patch('fichas.management.commands.carregar_regras.DATA_DIR', pasta):
+                with self.assertRaises(CommandError):
+                    call_command('carregar_regras', stdout=None)
+
+        self.assertFalse(Poder.objects.exists())
