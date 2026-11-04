@@ -30,5 +30,6 @@ urlpatterns = [
         name='login',
     ),
     path('accounts/', include('django.contrib.auth.urls')),
+    path('fichas/', include('fichas.urls')),
     path('', include('core.urls')),
 ]

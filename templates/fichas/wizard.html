@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Criar personagem | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<main class="page form-page">
+    <a href="{% url 'home' %}">Voltar às fichas</a>
+    <h1>Criação de personagem</h1>
+    <nav aria-label="Etapas da criação">
+        <ol class="step-list">
+            {% for nome in etapas %}
+                <li{% if forloop.counter == etapa %} aria-current="step"{% endif %}>{{ forloop.counter }}. {{ nome|capfirst }}</li>
+            {% endfor %}
+        </ol>
+    </nav>
+    {% if livre %}<p>Criação livre de mestre</p>{% endif %}
+    {% if revisao %}
+        <section class="review-summary" aria-label="Resumo da ficha">
+            <h2>{{ revisao.nome }}</h2>
+            <p>{{ revisao.conceito }}</p>
+            <p>{{ revisao.origem_nome }} · {{ revisao.classe_nome }}</p>
+            <p>Atributos: AGI {{ revisao.atributos.agilidade }}, FOR {{ revisao.atributos.forca }}, INT {{ revisao.atributos.intelecto }}, PRE {{ revisao.atributos.presenca }}, VIG {{ revisao.atributos.vigor }}</p>
+        </section>
+    {% endif %}
+    <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        {% if etapa > 1 %}<button class="button button-secondary" type="submit" name="voltar" value="1">Voltar</button>{% endif %}
+        <button class="button" type="submit">{% if etapa == 6 %}Criar ficha{% else %}Continuar{% endif %}</button>
+    </form>
+</main>
+{% endblock %}

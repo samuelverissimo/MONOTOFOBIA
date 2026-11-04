@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Editar {{ ficha.nome }} | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<main class="page form-page">
+    <a href="{% url 'fichas:detalhe' ficha.pk %}">Voltar à ficha</a>
+    <h1>Editar {{ ficha.nome }}</h1>
+    <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button class="button" type="submit">Salvar alterações</button>
+    </form>
+</main>
+{% endblock %}

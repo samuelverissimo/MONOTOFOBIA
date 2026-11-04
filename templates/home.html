@@ -15,8 +15,22 @@
         </nav>
     </header>
     <main class="home-content">
-        <!-- TODO: conteúdo da home será implementado depois -->
-        <p class="muted">Em breve.</p>
+        <div class="section-heading">
+            <h1>Fichas</h1>
+            <a class="button" href="{% url 'fichas:iniciar' %}">Criar personagem</a>
+        </div>
+        {% if fichas %}
+            <ul class="sheet-list">
+                {% for ficha in fichas %}
+                    <li>
+                        <a href="{% url 'fichas:detalhe' ficha.pk %}">{{ ficha.nome }}</a>
+                        <span>{{ ficha.classe|default:'Sem classe' }} · {{ ficha.get_status_display }}</span>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p class="muted">Nenhuma ficha ainda.</p>
+        {% endif %}
     </main>
 </div>
 {% endblock %}

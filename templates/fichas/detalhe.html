@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}{{ ficha.nome }} | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<div class="page">
+    <header class="topbar">
+        <a href="{% url 'home' %}">Fichas</a>
+        <nav aria-label="Ações da ficha">
+            <a class="button" href="{% url 'fichas:editar' ficha.pk %}">Editar</a>
+        </nav>
+    </header>
+    <main>
+        <h1>{{ ficha.nome }}</h1>
+        <p>{{ ficha.conceito }}</p>
+        <nav class="tabs" aria-label="Seções da ficha">
+            <a href="#status">Status</a>
+            <a href="#pericias">Perícias</a>
+            <a href="#condicoes">Condições</a>
+        </nav>
+        <section id="status">
+            <h2>Status</h2>
+            <p>{{ ficha.classe|default:'Sem classe' }} · {{ ficha.get_status_display }}</p>
+            <form hidden>{% csrf_token %}</form>
+            <div class="resource-grid" aria-label="Recursos">
+                <section class="resource" data-resource-panel="pv">
+                    <h3>PV</h3><p><output data-current="pv">{{ ficha.pv_atual }}</output> / <span data-max="pv">{{ maximos.pv }}</span></p>
+                    <button class="button button-secondary" type="button" data-resource="pv" data-delta="-1" aria-label="Diminuir PV">-</button>
+                    <button class="button" type="button" data-resource="pv" data-delta="1" aria-label="Aumentar PV">+</button>
+                </section>
+                {% if modo_recursos == 'padrao' %}
+                <section class="resource" data-resource-panel="pe">
+                    <h3>PE</h3><p><output data-current="pe">{{ ficha.pe_atual }}</output> / <span data-max="pe">{{ maximos.pe }}</span></p>
+                    <button class="button button-secondary" type="button" data-resource="pe" data-delta="-1" aria-label="Diminuir PE">-</button>
+                    <button class="button" type="button" data-resource="pe" data-delta="1" aria-label="Aumentar PE">+</button>
+                </section>
+                <section class="resource" data-resource-panel="san">
+                    <h3>SAN</h3><p><output data-current="san">{{ ficha.san_atual }}</output> / <span data-max="san">{{ maximos.san }}</span></p>
+                    <button class="button button-secondary" type="button" data-resource="san" data-delta="-1" aria-label="Diminuir SAN">-</button>
+                    <button class="button" type="button" data-resource="san" data-delta="1" aria-label="Aumentar SAN">+</button>
+                </section>
+                {% else %}
+                <section class="resource" data-resource-panel="pd">
+                    <h3>PD</h3><p><output data-current="pd">{{ ficha.pd_atual }}</output> / <span data-max="pd">{{ maximos.pd }}</span></p>
+                    <button class="button button-secondary" type="button" data-resource="pd" data-delta="-1" aria-label="Diminuir PD">-</button>
+                    <button class="button" type="button" data-resource="pd" data-delta="1" aria-label="Aumentar PD">+</button>
+                </section>
+                {% endif %}
+            </div>
+            <p class="feedback" data-feedback role="status" aria-live="polite"></p>
+            <h3>Atributos</h3>
+            <dl class="stat-list">
+                <dt>Agilidade</dt><dd>{{ ficha.agilidade }}</dd>
+                <dt>Força</dt><dd>{{ ficha.forca }}</dd>
+                <dt>Intelecto</dt><dd>{{ ficha.intelecto }}</dd>
+                <dt>Presença</dt><dd>{{ ficha.presenca }}</dd>
+                <dt>Vigor</dt><dd>{{ ficha.vigor }}</dd>
+            </dl>
+        </section>
+        <section id="pericias">
+            <h2>Perícias</h2>
+            <ul>
+                {% for ficha_pericia in ficha_pericias %}
+                    <li>{{ ficha_pericia.pericia.nome }} · {{ ficha_pericia.get_grau_display }}</li>
+                {% empty %}
+                    <li>Nenhuma perícia registrada.</li>
+                {% endfor %}
+            </ul>
+        </section>
+        <section id="condicoes">
+            <h2>Condições</h2>
+            <ul data-condition-list>
+                {% for ficha_condicao in condicoes_ativas %}
+                    <li data-active-condition="{{ ficha_condicao.condicao_id }}">
+                        {{ ficha_condicao.condicao.nome }}
+                        <button class="button button-secondary" type="button" data-condition-remove="{{ ficha_condicao.condicao_id }}">Remover</button>
+                    </li>
+                {% empty %}
+                    <li data-empty-conditions>Nenhuma condição ativa.</li>
+                {% endfor %}
+            </ul>
+            <div class="condition-add">
+                <label for="condition-select">Adicionar condição</label>
+                <select id="condition-select">
+                    {% for condicao in condicoes_disponiveis %}<option value="{{ condicao.pk }}">{{ condicao.nome }}</option>{% endfor %}
+                </select>
+                <button class="button" type="button" data-condition-add>Adicionar</button>
+            </div>
+        </section>
+        <section class="roll-panel" aria-labelledby="roll-heading">
+            <h2 id="roll-heading">Rolar teste</h2>
+            <form data-roll-form>
+                <label for="roll-type">Tipo</label>
+                <select id="roll-type" name="tipo">
+                    <option value="atributo">Atributo</option>
+                    <option value="pericia">Perícia</option>
+                    <option value="livre">Dados livres</option>
+                </select>
+                <label for="roll-target">Alvo</label>
+                <select id="roll-target" name="alvo">
+                    {% for atributo in atributos %}<option value="{{ atributo }}" data-roll-for="atributo">{{ atributo|capfirst }}</option>{% endfor %}
+                    {% for ficha_pericia in ficha_pericias %}<option value="{{ ficha_pericia.pericia_id }}" data-roll-for="pericia">{{ ficha_pericia.pericia.nome }}</option>{% endfor %}
+                    {% for numero in "1234567890" %}<option value="{{ forloop.counter }}" data-roll-for="livre">{{ forloop.counter }} dado(s)</option>{% endfor %}
+                </select>
+                <label for="roll-bonus">Bônus</label>
+                <input id="roll-bonus" name="bonus" type="number" min="-100" max="100" value="0">
+                <button class="button" type="submit">Rolar</button>
+            </form>
+            <p data-roll-result role="status" aria-live="polite"></p>
+        </section>
+        {% if ficha.anotacoes_jogador %}<section><h2>Anotações privadas</h2><p>{{ ficha.anotacoes_jogador }}</p></section>{% endif %}
+        {% if mestre and ficha.anotacoes_mestre %}<section><h2>Anotações do mestre</h2><p>{{ ficha.anotacoes_mestre }}</p></section>{% endif %}
+    </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+    {% load static %}
+    <script src="{% static 'js/ficha.js' %}" defer></script>
+{% endblock %}

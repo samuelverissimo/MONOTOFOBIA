@@ -1,10 +1,24 @@
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import SimpleTestCase, TestCase
+from django.test import Client, SimpleTestCase, TestCase
+from django.urls import reverse
 from django.utils.crypto import get_random_string
 
-from fichas.models import Atributo, Classe, Condicao, ConfiguracaoMesa, Ficha, Origem, Patente, Pericia
+from fichas.models import (
+    Atributo,
+    Classe,
+    Condicao,
+    ConfiguracaoMesa,
+    Ficha,
+    FichaCondicao,
+    FichaPericia,
+    LogAlteracao,
+    Origem,
+    Patente,
+    Pericia,
+    Rolagem,
+)
 from fichas.permissions import fichas_visiveis_para, is_mestre, pode_editar_ficha, pode_ver_ficha
 from fichas.regras import (
     bonus_pericia,
@@ -22,6 +36,7 @@ from fichas.regras import (
     rolar_teste,
     validar_atributos_iniciais,
 )
+from fichas.forms import AtributosFichaForm, ConceitoFichaForm, FichaEdicaoForm
 
 User = get_user_model()
 
@@ -85,6 +100,43 @@ class RegrasTests(SimpleTestCase):
         self.assertEqual(damage['total'], 17)
 
 
+class FichaWizardFormTests(SimpleTestCase):
+    def test_attribute_form_accepts_both_initial_budgets_before_class_step(self):
+        regular = {
+            'agilidade': 2,
+            'forca': 0,
+            'intelecto': 3,
+            'presenca': 3,
+            'vigor': 1,
+        }
+        survivor = {**regular, 'intelecto': 2}
+        self.assertTrue(AtributosFichaForm(regular).is_valid())
+        self.assertTrue(AtributosFichaForm(survivor).is_valid())
+        self.assertFalse(AtributosFichaForm({**regular, 'intelecto': 4}).is_valid())
+
+    def test_free_attribute_budget_requires_view_supplied_master_flag(self):
+        free_data = {
+            'agilidade': 4,
+            'forca': 2,
+            'intelecto': 2,
+            'presenca': 1,
+            'vigor': 1,
+        }
+        self.assertFalse(AtributosFichaForm(free_data).is_valid())
+        self.assertTrue(AtributosFichaForm(free_data, livre=True).is_valid())
+        self.assertTrue(ConceitoFichaForm({}, livre=True).is_valid())
+
+    def test_edit_form_whitelist_hides_master_notes_from_players(self):
+        jogador = set(FichaEdicaoForm(mestre=False).fields)
+        mestre = set(FichaEdicaoForm(mestre=True).fields)
+        self.assertNotIn('anotacoes_mestre', jogador)
+        self.assertIn('anotacoes_mestre', mestre)
+        self.assertNotIn('dono', jogador)
+        self.assertIn('versao', jogador)
+        self.assertNotIn('status', jogador)
+        self.assertNotIn('nex', jogador)
+
+
 class FichaPermissionTests(TestCase):
     def setUp(self):
         self.owner = User.objects.create_user(username='owner', password=get_random_string(32))
@@ -107,6 +159,164 @@ class FichaPermissionTests(TestCase):
         Ficha.objects.create(dono=self.other, nome='Outra ficha', nex=5)
         self.assertEqual(list(fichas_visiveis_para(self.owner)), [self.ficha])
         self.assertEqual(fichas_visiveis_para(self.master).count(), 2)
+
+
+class FichaViewsTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(username='ficha-owner', password=get_random_string(32))
+        self.other = User.objects.create_user(username='ficha-other', password=get_random_string(32))
+        self.master = User.objects.create_superuser(
+            username='ficha-master', email='ficha-master@example.com', password=get_random_string(32)
+        )
+        self.classe = Classe.objects.create(
+            nome='Combatente', slug='combatente', fonte='OPRPG', resumo='',
+            pericias_obrigatorias=[['luta']],
+        )
+        self.origem = Origem.objects.create(
+            nome='Acadêmico', slug='academico', fonte='OPRPG', resumo='',
+            poder_nome='Saber é poder', poder_resumo='',
+        )
+        self.fortitude = self._pericia('fortitude', 'vigor')
+        self.luta = self._pericia('luta', 'forca')
+        self.pontaria = self._pericia('pontaria', 'agilidade')
+        self.origem.pericias_treinadas.add(self.fortitude)
+        self.ficha = Ficha.objects.create(
+            dono=self.owner, nome='Agente', classe=self.classe, nex=5,
+            pv_atual=10, anotacoes_jogador='privada', anotacoes_mestre='segredo do mestre',
+        )
+
+    @staticmethod
+    def _pericia(slug, atributo):
+        return Pericia.objects.create(
+            nome=slug.capitalize(), slug=slug, fonte='OPRPG', resumo='', atributo=atributo,
+        )
+
+    def test_owner_can_complete_creation_wizard(self):
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse('fichas:iniciar'))
+        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 1}))
+
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {
+            'nome': 'Nova agente', 'conceito': 'Investigadora', 'aparencia': 'Casaco escuro',
+            'personalidade': 'Atenta', 'historia': 'Chegou recentemente à Ordem.', 'objetivo': 'Investigar o caso',
+        })
+        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 2}))
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 2}), {
+            'agilidade': 3, 'forca': 2, 'intelecto': 0, 'presenca': 1, 'vigor': 3,
+        })
+        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 3}))
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 3}), {'origem': self.origem.pk})
+        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 4}))
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 4}), {'classe': self.classe.pk})
+        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 5}))
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 5}), {
+            'pericia_obrigatoria_0': self.luta.pk, 'pericias_escolhidas': [self.pontaria.pk],
+        })
+        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 6}))
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 6}), {'confirmar': 'on'})
+
+        ficha = Ficha.objects.get(nome='Nova agente')
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': ficha.pk}))
+        self.assertEqual((ficha.dono, ficha.pv_atual, ficha.pe_atual, ficha.san_atual), (self.owner, 23, 3, 12))
+        self.assertSetEqual(
+            set(ficha.pericias.values_list('pericia__slug', flat=True)),
+            {'fortitude', 'luta', 'pontaria'},
+        )
+
+    def test_free_creation_mode_is_granted_only_to_master(self):
+        self.client.force_login(self.other)
+        self.client.get(f"{reverse('fichas:iniciar')}?livre=1")
+        self.assertFalse(self.client.session['fichas.criacao']['livre'])
+
+        self.client.force_login(self.master)
+        self.client.get(f"{reverse('fichas:iniciar')}?livre=1")
+        self.assertTrue(self.client.session['fichas.criacao']['livre'])
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {})
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 2}), {
+            'agilidade': 4, 'forca': 4, 'intelecto': 4, 'presenca': 4, 'vigor': 4,
+        })
+        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 3}))
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 3}), {})
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 4}), {})
+        self.client.post(reverse('fichas:criar', kwargs={'etapa': 5}), {})
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 6}), {})
+        self.assertEqual(response.status_code, 302)
+        ficha = Ficha.objects.get(dono=self.master, agilidade=4, forca=4, intelecto=4, presenca=4, vigor=4)
+        self.assertIsNone(ficha.classe_id)
+
+    def test_foreign_ficha_is_not_discoverable_or_editable(self):
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk})).status_code, 404)
+        self.assertEqual(self.client.get(reverse('fichas:editar', kwargs={'pk': self.ficha.pk})).status_code, 404)
+        self.assertEqual(self.client.post(
+            reverse('fichas:recurso', kwargs={'pk': self.ficha.pk}),
+            data='{"recurso":"pv","delta":1}', content_type='application/json',
+        ).status_code, 404)
+
+    def test_edit_uses_version_and_ignores_privileged_fields_for_owner(self):
+        self.client.force_login(self.owner)
+        url = reverse('fichas:editar', kwargs={'pk': self.ficha.pk})
+        dados = {
+            'nome': 'Nome atualizado', 'jogador': '', 'conceito': '', 'aparencia': '',
+            'personalidade': '', 'historia': '', 'objetivo': '',
+            'anotacoes_jogador': 'anotação nova', 'versao': 1,
+            'anotacoes_mestre': 'tentativa de alteração', 'status': 'morta', 'nex': 99,
+        }
+        response = self.client.post(url, dados)
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.ficha.refresh_from_db()
+        self.assertEqual((self.ficha.nome, self.ficha.versao, self.ficha.status, self.ficha.nex),
+                         ('Nome atualizado', 2, 'ativa', 5))
+        self.assertEqual(self.ficha.anotacoes_mestre, 'segredo do mestre')
+        self.assertFalse(LogAlteracao.objects.filter(valor_novo__contains='anotação nova').exists())
+        self.assertFalse(LogAlteracao.objects.filter(valor_novo__contains='segredo do mestre').exists())
+        response = self.client.post(url, dados)
+        self.assertEqual(response.status_code, 409)
+
+    def test_resource_condition_and_roll_endpoints_validate_and_persist(self):
+        self.client.force_login(self.owner)
+        resource = reverse('fichas:recurso', kwargs={'pk': self.ficha.pk})
+        response = self.client.post(resource, data='{"recurso":"pv","delta":2}', content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        self.ficha.refresh_from_db()
+        self.assertEqual(self.ficha.pv_atual, 12)
+        self.assertEqual(self.client.post(resource, data='{"recurso":"pv","delta":999}', content_type='application/json').status_code, 400)
+        self.assertEqual(self.client.post(resource, data='{"recurso":"pv","delta":true}', content_type='application/json').status_code, 400)
+        self.assertEqual(self.client.post(resource, data='{"recurso":[],"delta":1}', content_type='application/json').status_code, 400)
+        self.assertEqual(self.client.post(resource, data='{"recurso":"pd","delta":1}', content_type='application/json').status_code, 400)
+
+        ConfiguracaoMesa.objects.create(modo_recursos='sem_sanidade')
+        self.assertEqual(self.client.post(resource, data='{"recurso":"pe","delta":1}', content_type='application/json').status_code, 400)
+        self.assertEqual(self.client.post(resource, data='{"recurso":"pd","delta":1}', content_type='application/json').status_code, 200)
+
+        condicao = Condicao.objects.create(nome='Abalado', slug='abalado', fonte='OPRPG', resumo='')
+        condition_url = reverse('fichas:condicao', kwargs={'pk': self.ficha.pk})
+        response = self.client.post(
+            condition_url, data=f'{{"acao":"adicionar","condicao":{condicao.pk}}}',
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(FichaCondicao.objects.filter(ficha=self.ficha, condicao=condicao).exists())
+        self.assertTrue(LogAlteracao.objects.filter(ficha=self.ficha, campo='condicao', valor_novo=condicao.nome).exists())
+
+        roll_url = reverse('fichas:rolar', kwargs={'pk': self.ficha.pk})
+        response = self.client.post(
+            roll_url, data='{"tipo":"pericia","alvo":%d,"bonus":0}' % self.luta.pk,
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Rolagem.objects.filter(ficha=self.ficha, usuario=self.owner).count(), 1)
+        self.assertEqual(response.json()['total'], response.json()['dado_escolhido'] + 0)
+        self.assertEqual(self.client.post(roll_url, data='{}', content_type='application/json').status_code, 400)
+
+    def test_json_endpoints_enforce_csrf(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.owner)
+        response = csrf_client.post(
+            reverse('fichas:recurso', kwargs={'pk': self.ficha.pk}),
+            data='{"recurso":"pv","delta":1}', content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 403)
 
 
 class MesaAndMasterCommandTests(TestCase):
