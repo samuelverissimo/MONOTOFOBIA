@@ -35,6 +35,13 @@
         resumo.className = 'muted';
         resumo.textContent = condicao.resumo;
         linha.append(nome, resumo);
+        if (condicao.turnos_restantes !== null && condicao.turnos_restantes !== undefined) {
+            const duracao = document.createElement('span');
+            duracao.className = 'muted';
+            duracao.dataset.conditionDuration = condicao.id;
+            duracao.textContent = `Turnos restantes: ${condicao.turnos_restantes}.`;
+            linha.append(duracao);
+        }
         if (lista.dataset.canEdit === 'true') {
             if (condicao.proxima_escalada) {
                 const escalar = document.createElement('button');
@@ -83,6 +90,7 @@
                 }
             } else if (adicionar || escalar || remover) {
                 const seletor = document.querySelector('#condition-select');
+                const campoDuracao = document.querySelector('#condition-turns');
                 const lista = document.querySelector('[data-condition-list]');
                 const acao = adicionar ? 'adicionar' : (escalar ? 'escalar' : 'remover');
                 const id = adicionar
@@ -90,7 +98,20 @@
                     : Number((escalar || remover).dataset.conditionEscalate
                         || (escalar || remover).dataset.conditionRemove);
                 if (!id) return;
-                const resultado = await enviar('condicoes', { acao, condicao: id });
+                const dados = { acao, condicao: id };
+                if (adicionar) {
+                    if (campoDuracao?.value) {
+                        const duracao = Number(campoDuracao.value);
+                        if (!Number.isInteger(duracao) || duracao < 1 || duracao > 99) {
+                            throw new Error('A duração deve ser de 1 a 99 turnos.');
+                        }
+                        dados.turnos_restantes = duracao;
+                    } else {
+                        dados.turnos_restantes = null;
+                    }
+                }
+                const resultado = await enviar('condicoes', dados);
+                if (adicionar && campoDuracao) campoDuracao.value = '';
                 if (resultado.removida) {
                     document.querySelector(`[data-active-condition="${resultado.removida.id}"]`)?.remove();
                     adicionarOpcaoCondicao(seletor, resultado.removida);
@@ -109,6 +130,7 @@
                         id: resultado.condicao,
                         nome: resultado.nome,
                         resumo: resultado.resumo,
+                        turnos_restantes: resultado.turnos_restantes,
                         proxima_escalada: resultado.proxima_escalada,
                     }, lista));
                     seletor?.querySelector(`option[value="${resultado.condicao}"]`)?.remove();

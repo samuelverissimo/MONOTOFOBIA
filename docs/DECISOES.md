@@ -12,9 +12,11 @@
 
 - Os PDFs existentes estão na raiz de `docs/`, embora o caminho indicado fosse `docs/regras/`. O extrator aceita ambos os locais e grava sempre em `docs/regras/texto/OPRPG/` e `docs/regras/texto/SaH/`, sem mover nem duplicar os PDFs.
 - PDFs em qualquer nível de `docs/`, textos extraídos e `docs/ARQUIVOS SECRETOS/` são ignorados pelo Git. Nenhum conteúdo de livro ou material privado será enviado ao repositório.
+- Em 2026-11-04, o proprietário informou que tornou o repositório privado. Isso reduz a exposição pública, mas não autoriza redistribuição de conteúdo protegido nem substitui práticas de minimização de dados.
+- Temporizadores de condições são opcionais e definidos por instância, não derivados dos catálogos. O sistema decrementa no início do turno da ficha afetada e remove/audita ao iniciar o turno quando resta um; condições sem valor são atemporais até remoção ou encerramento da cena, e Morrendo permanece no contador próprio do combate.
 - A extração usa blocos com coordenadas do PyMuPDF. Quando detecta duas colunas sobrepostas, lê a coluna esquerda antes da direita; blocos largos, como títulos, funcionam como separadores. Páginas sem texto geram arquivo vazio para preservar a correspondência de páginas.
 - Nomes `pagina-NNN.txt` indicam a página física do PDF, não a paginação impressa. Para o miolo do OPRPG, as amostras confirmam página impressa = página PDF − 10; essa relação não será aplicada automaticamente a capa, páginas sem número ou outros livros.
-- O repositório GitHub `samuelverissimo/MONOTOFOBIA` está público. Não há arquivos de `docs/` rastreados atualmente, mas o proprietário deve torná-lo privado antes de adicionar dados da mesa ou material licenciado.
+- No momento desta decisão inicial, o repositório GitHub `samuelverissimo/MONOTOFOBIA` estava público. Em atualização posterior, o proprietário informou que o tornou privado; dados pessoais continuam sujeitos a minimização e conteúdo protegido não deve ser redistribuído sem autorização.
 - As páginas sem texto extraível contêm imagens rasterizadas e geram TXT vazio, não sendo consideradas páginas em branco. OPRPG: PDF p. 2, 3, 4, 5, 7, 10, 14, 15, 16, 22, 48, 60, 78, 104, 162, 186, 304 e 331. SaH: PDF p. 7, 63, 125 e 167. Qualquer regra/tabela possivelmente contida nelas deve ser conferida visualmente antes de cadastrar dados.
 
 ## Pontos a confirmar no texto dos livros
@@ -39,7 +41,7 @@
 
 ## Fundações de segurança e operação
 
-- Em 2026-11-04, a API do GitHub confirmou que `samuelverissimo/MONOTOFOBIA` está público. A conta disponível não tem permissão administrativa para mudar a visibilidade; o README mantém um aviso para não armazenar dados da mesa nem material licenciado até o proprietário privatizar o repositório.
+- Registro histórico: em 2026-11-04, a API do GitHub confirmou que `samuelverissimo/MONOTOFOBIA` estava público e a conta disponível não tinha permissão administrativa para mudar a visibilidade. Posteriormente, o proprietário informou que alterou essa configuração para privado.
 - `db.sqlite3`, `.env`, arquivos de log, PDFs dentro de `docs/`, textos extraídos e `docs/ARQUIVOS SECRETOS/` permanecem ignorados pelo Git. `.gitattributes` normaliza finais de linha para LF.
 - O `requirements-dev.txt` contém dependências de runtime e ferramentas de desenvolvimento. PyMuPDF, usado apenas por `tools/extrair_pdf.py`, fica em `requirements-pdf.txt`; a CI não instala as dependências de PDF ou pre-commit.
 - Fichas arquivadas, mortas ou aposentadas são somente leitura para o dono nos fluxos de recurso, condição, rolagem, inventário, avanço de NEX e edição. O mestre pode alterá-las; arquivar/restaurar continua sendo uma operação de status própria.
@@ -98,4 +100,4 @@
 - O mestre rola Iniciativa fisicamente e cadastra resultados; a ordem fica fixa. A interface pula participantes surpreendidos na primeira rodada. O mestre resolve fisicamente empates antes de cadastrar os resultados definitivos.
 - O rastreador registra ação padrão, movimento (até duas), ação completa e uma reação defensiva por rodada. É uma anotação de uso presencial: não resolve testes, bônus, alvos, nem confirma treinamento para as reações. O mestre pode inserir o dano já calculado fisicamente e aplicá-lo à ficha participante, reaproveitando o controle de PV e auditoria existentes.
 - Dano aplicado pelo painel ou por ajuste de PV que leve de PV positivo a zero registra Inconsciente e Morrendo. Curar pelo menos 1 PV remove Inconsciente, mas não Morrendo; o mestre registra sucesso físico em Medicina DT 20 para estabilizar. Ao iniciar o terceiro turno Morrendo na cena, a ficha passa a status morta. A contagem fica na associação da condição Morrendo e é auditada.
-- O rastreador não é mapa tático e não automatiza gatilhos de dano massivo, alcance, cobertura, manobras ou reações. Nenhuma lista de armas ou conteúdo de livro foi adicionada ao repositório público.
+- O rastreador não é mapa tático e não automatiza gatilhos de dano massivo, alcance, cobertura, manobras ou reações. Nenhuma lista de armas ou conteúdo de livro foi adicionada ao repositório.

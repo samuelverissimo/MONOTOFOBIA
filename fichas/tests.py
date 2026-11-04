@@ -1027,6 +1027,7 @@ class FichaViewsTests(TestCase):
         )
         ficha_condicao = FichaCondicao.objects.create(
             ficha=self.ficha, condicao=abalado, anotacao='nota privada da condição',
+            turnos_restantes=3,
         )
         response = self.client.post(
             reverse('fichas:condicao', kwargs={'pk': self.ficha.pk}),
@@ -1039,9 +1040,14 @@ class FichaViewsTests(TestCase):
         self.assertEqual(response.json()['removida']['id'], abalado.pk)
         self.assertFalse(FichaCondicao.objects.filter(pk=ficha_condicao.pk).exists())
         self.assertTrue(FichaCondicao.objects.filter(ficha=self.ficha, condicao=apavorado).exists())
+        self.assertEqual(response.json()['turnos_restantes'], 3)
+        self.assertEqual(
+            FichaCondicao.objects.get(ficha=self.ficha, condicao=apavorado).turnos_restantes,
+            3,
+        )
         self.assertTrue(LogAlteracao.objects.filter(
             ficha=self.ficha, campo='condicao',
-            valor_antigo='Abalado', valor_novo='Apavorado',
+            valor_antigo='Abalado', valor_novo='Apavorado (duração: 3 turnos)',
         ).exists())
 
         FichaCondicao.objects.create(
@@ -1053,8 +1059,87 @@ class FichaViewsTests(TestCase):
         self.assertEqual(atualizacoes.status_code, 200)
         self.assertEqual(atualizacoes.json()['defesa'], 6)
         self.assertEqual(atualizacoes.json()['condicoes'][0]['resumo'], 'Resumo.')
+        self.assertIsNone(atualizacoes.json()['condicoes'][0]['turnos_restantes'])
         self.assertNotContains(atualizacoes, 'não enviar ao jogador')
         self.assertNotContains(atualizacoes, 'segredo do mestre')
+
+    def test_timed_condition_counts_down_on_affected_turn_and_expires_with_audit(self):
+        condition = Condicao.objects.create(
+            nome='Condição temporária', slug='condicao-temporaria',
+            fonte='Personalizado', resumo='',
+        )
+        self.client.force_login(self.owner)
+        condition_url = reverse('fichas:condicao', kwargs={'pk': self.ficha.pk})
+        response = self.client.post(
+            condition_url,
+            data=f'{{"acao":"adicionar","condicao":{condition.pk},"turnos_restantes":2}}',
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['turnos_restantes'], 2)
+        self.assertTrue(LogAlteracao.objects.filter(
+            ficha=self.ficha, campo='condicao',
+            valor_novo='Condição temporária (duração: 2 turnos)',
+        ).exists())
+
+        encontro = EncontroCombate.objects.create(criado_por=self.master, nome='Duração')
+        ParticipanteCombate.objects.create(
+            encontro=encontro, ficha=self.ficha, nome=self.ficha.nome, iniciativa=10,
+        )
+        self.client.force_login(self.master)
+        avancar = reverse('fichas:avancar_turno_combate', kwargs={'pk': encontro.pk})
+        self.client.post(avancar)
+        ficha_condicao = FichaCondicao.objects.get(ficha=self.ficha, condicao=condition)
+        self.assertEqual(ficha_condicao.turnos_restantes, 1)
+        self.assertTrue(LogAlteracao.objects.filter(
+            ficha=self.ficha, campo='condicao.duracao',
+            valor_antigo='2', valor_novo='1',
+        ).exists())
+
+        self.client.post(avancar)
+        self.assertFalse(FichaCondicao.objects.filter(
+            ficha=self.ficha, condicao=condition,
+        ).exists())
+        self.assertTrue(LogAlteracao.objects.filter(
+            ficha=self.ficha, campo='condicao',
+            valor_antigo='Condição temporária',
+            valor_novo='Expirada no início do turno',
+        ).exists())
+
+    def test_condition_duration_validation_and_morrendo_counter_are_separate(self):
+        condition = Condicao.objects.create(
+            nome='Abalado', slug='abalado', fonte='Personalizado', resumo='',
+        )
+        morrendo = Condicao.objects.create(
+            nome='Morrendo', slug='morrendo', fonte='Personalizado', resumo='',
+        )
+        self.client.force_login(self.owner)
+        url = reverse('fichas:condicao', kwargs={'pk': self.ficha.pk})
+        for duration in ('true', '0', '100', '"2"'):
+            response = self.client.post(
+                url,
+                data=f'{{"acao":"adicionar","condicao":{condition.pk},"turnos_restantes":{duration}}}',
+                content_type='application/json',
+            )
+            self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.client.post(
+            url,
+            data=f'{{"acao":"adicionar","condicao":{morrendo.pk},"turnos_restantes":1}}',
+            content_type='application/json',
+        ).status_code, 400)
+
+        FichaCondicao.objects.create(
+            ficha=self.ficha, condicao=morrendo, turnos_restantes=1,
+        )
+        encontro = EncontroCombate.objects.create(criado_por=self.master, nome='Morrendo')
+        ParticipanteCombate.objects.create(
+            encontro=encontro, ficha=self.ficha, nome=self.ficha.nome, iniciativa=10,
+        )
+        self.client.force_login(self.master)
+        self.client.post(reverse('fichas:avancar_turno_combate', kwargs={'pk': encontro.pk}))
+        morrendo_ativa = FichaCondicao.objects.get(ficha=self.ficha, condicao=morrendo)
+        self.assertEqual(morrendo_ativa.turnos_restantes, 1)
+        self.assertEqual(morrendo_ativa.turnos_morrendo, 0)
 
     def test_pending_attribute_and_training_choices_are_resolved_and_audited(self):
         self.client.force_login(self.owner)
@@ -1398,11 +1483,19 @@ class FichaViewsTests(TestCase):
 
     def test_player_detail_shows_physical_roll_ui_but_hides_master_notes(self):
         self.client.force_login(self.owner)
+        condicao = Condicao.objects.create(
+            nome='Temporária', slug='temporaria', fonte='Personalizado', resumo='',
+        )
+        FichaCondicao.objects.create(
+            ficha=self.ficha, condicao=condicao, turnos_restantes=2,
+        )
 
         response = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
 
         self.assertContains(response, 'Dados físicos (principal)')
         self.assertContains(response, 'data-attribute-value="1"')
+        self.assertContains(response, 'id="condition-turns"')
+        self.assertContains(response, 'Turnos restantes: 2.')
         self.assertNotContains(response, 'segredo do mestre')
         self.client.force_login(self.master)
         response = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
@@ -1427,6 +1520,7 @@ class FichaViewsTests(TestCase):
             'id': condicao.pk,
             'nome': 'Abalado',
             'resumo': condicao.resumo,
+            'turnos_restantes': None,
             'proxima_escalada': None,
         }])
         self.assertNotIn('anotacao', response.json())

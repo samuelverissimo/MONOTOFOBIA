@@ -5,7 +5,7 @@ Atualizado em 2026-11-04. Este documento resume o estado conhecido do projeto pa
 ## Estado do repositório
 
 - Projeto: Django para campanha de Ordem Paranormal RPG, workspace `MONOTOFOBIA`.
-- Branch: `main`; o último estado publicado neste registro é `611d27b` em `origin/main`.
+- Branch: `main`; o último estado publicado antes desta rodada era `6b8a570` em `origin/main`.
 - Commits publicados nesta rodada:
   - `611d27b` `fix: validate condition effects when loading rules`
   - `7ec7639` `feat: validate power prerequisites and expire scene conditions`
@@ -18,7 +18,7 @@ Atualizado em 2026-11-04. Este documento resume o estado conhecido do projeto pa
   - `71ab982` `feat(fichas): add manual inventory management`
   - `f62d0fc` `feat(fichas): add table settings and active sheet limits`
 - Os commits publicados passaram pelos hooks Gitleaks e Bandit. O usuário solicitou commit e push para esta rodada; dados locais e catálogos licenciados continuam fora do Git.
-- O remoto GitHub foi verificado como **público**. Não armazene dados da mesa nem material licenciado nele; a privatização depende do proprietário.
+- Em 2026-11-04, o proprietário informou que tornou o remoto GitHub privado. Ainda não armazene conteúdo de terceiros sem autorização; acesso privado não altera direitos autorais.
 
 ## Ambiente local
 
@@ -34,7 +34,7 @@ Atualizado em 2026-11-04. Este documento resume o estado conhecido do projeto pa
 - As alterações desta sessão foram gravadas diretamente nos arquivos do workspace. `git status` confirma mudanças locais; não há alterações staged e nenhum commit ou push foi feito. Portanto, não há uma fila pendente de “Keep” do editor para estas mudanças.
 - Um clone novo ou `git pull` em outra máquina **não** recebe alterações locais não commitadas. Para continuar sem commit/push, copie o projeto inteiro com as mudanças, incluindo arquivos novos e não rastreados. Não copie `.venv/`, `.env`, `db.sqlite3`, PDFs, textos extraídos ou dados secretos; transfira banco/PDFs apenas por meio privado e autorizado se forem realmente necessários.
 - Na máquina de destino, confirme o estado com `git status --short`, prepare o ambiente conforme “Preparar outra máquina Windows” e rode `python manage.py migrate`, `python manage.py carregar_regras` e a suíte de testes. Não sobrescreva alterações do destino ao copiar; se já houver mudanças lá, compare e integre antes.
-- Se a transferência for feita somente por GitHub, será necessário criar e enviar um commit das alterações; isso não foi autorizado nem realizado. Não faça isso sem autorização expressa. O remoto é público, então mantenha dados de campanha e material licenciado fora dele.
+- No snapshot desta transferência, o remoto ainda era descrito como público e não havia autorização para commit/push; ambos os pontos foram supersedidos pelas instruções posteriores do proprietário/usuário.
 
 ### Preparar outra máquina Windows
 
@@ -92,7 +92,7 @@ Para Linux/macOS, ative com `source .venv/bin/activate`; os demais comandos Djan
 
 ## Lacunas e próximos passos
 
-1. Continuar curadoria dos catálogos de trilhas, poderes, rituais, itens, armas e proteções. Os JSONs novos estão vazios; inserir apenas dados concisos, revisados e próprios/autorizados. O repositório GitHub é público.
+1. Continuar curadoria dos catálogos de trilhas, poderes, rituais, itens, armas e proteções. Os JSONs novos estão vazios; inserir apenas dados concisos, revisados e próprios/autorizados. O proprietário informou que o repositório foi tornado privado em 2026-11-04.
 2. O rastreador agora contabiliza gastos de PE/PD por turno e impõe os limites de progressão/patente. Ainda falta conferir a regra completa de custo mínimo e exceções com fontes autorizadas antes de automatizá-las.
 3. Combate continua assistido, não automatizado: sem mapa, alcance, resolução de ataques, aplicação automática de dano ou validação de reações; o mestre informa dano físico já calculado. O gatilho de dano massivo também é manual.
 4. Fazer validação visual de interface mobile/acessibilidade em aparelho real.
@@ -106,7 +106,7 @@ Para Linux/macOS, ative com `source .venv/bin/activate`; os demais comandos Djan
 - A suíte foi executada novamente neste estado: **97 testes passaram** e o system check do Django não encontrou problemas. `git diff --check` não encontrou erros; Git apenas avisou sobre normalização CRLF/LF.
 - Para continuar em outra máquina sem commit/push, transfira o projeto completo com alterações rastreadas e não rastreadas. Não transfira `.venv/`; mantenha `.env`, `db.sqlite3`, logs, PDFs, textos extraídos e dados da mesa fora do Git. Se precisar manter as fichas locais, faça backup e transferência segura do SQLite. Não sobrescreva trabalho já existente no destino.
 - Na máquina de destino, prepare o ambiente conforme `README.md`, crie um `.env` com `SECRET_KEY` nova e execute `python manage.py migrate`, `python manage.py carregar_regras` e `python manage.py test`. Crie/confirme as contas manualmente; `definir_mestre samukamestre` só depois de a conta existir e com autorização. Troque a senha temporária conhecida do usuário de desenvolvimento `admin`; nunca a use em produção.
-- Se a transferência for feita via GitHub, será necessário criar e enviar commit das mudanças, o que não foi autorizado nem realizado. Como o remoto está público, não envie dados de campanha nem conteúdo licenciado.
+- No snapshot desta transferência, ainda não havia commit/push autorizado. Esse registro é histórico e foi supersedido pelos commits/push autorizados posteriormente; a visibilidade do remoto também foi atualizada pelo proprietário.
 
 Consulte também `docs/COMO_USAR.md` para os fluxos de jogadores e mestre, `docs/MODELOS.md` para os modelos e `docs/COBERTURA.md` para o estado detalhado dos catálogos.
 
@@ -117,6 +117,14 @@ Consulte também `docs/COMO_USAR.md` para os fluxos de jogadores e mestre, `docs
 - O carregador também rejeita efeitos de condição com campos desconhecidos, booleanos ou valores fora do limite, abortando a transação. Não incluiu dados de catálogo licenciados.
 - Validação deste avanço: **111 testes passaram**, `check` sem problemas, `makemigrations --check --dry-run` sem alterações e `git diff --check` sem erros. Gitleaks e Bandit passaram nos hooks do commit.
 - As lacunas de efeitos dependentes de rodada/ação, catálogo de regras, automação completa de combate e validação em aparelho real continuam pendentes.
+- O proprietário informou que tornou o repositório privado em 2026-11-04; conteúdo de terceiros continua sujeito a direitos autorais e autorização.
+
+## Continuação do avanço parcial
+
+- Condições agora aceitam duração opcional de 1 a 99 turnos por ficha. O contador diminui no início do turno do personagem afetado, expira e registra auditoria ao chegar a zero; a duração é mantida ao escalar uma condição. Condições sem duração permanecem sem temporizador.
+- Morrendo permanece sob o contador letal da cena e não usa o temporizador genérico.
+- Esta funcionalidade não presume duração de nenhum efeito do catálogo: o mestre/jogador autorizado informa a duração da instância. Ainda falta automatizar efeitos dependentes de ação e validação de regras específicas.
+- Verificação desta continuação: **113 testes passaram**, incluindo validação dos limites, decremento/expiração, auditoria, polling, escalada e separação do contador de Morrendo. `check`, `makemigrations --check --dry-run` e `git diff --check` sem problemas.
 
 ## Rechecagem anterior em 2026-11-04
 
@@ -124,7 +132,7 @@ O relatório foi comparado com as views, modelos, templates, JSONs e testes atua
 
 - Confirmado no código: painel/histórico do mestre, rastreador de combate, inventário manual, progressão NEX/estágio/nível/patentes, testes físicos, dano avaliado, polling e condições com escalada/auditoria estão presentes, com cobertura em `core/tests.py` e `fichas/tests.py`.
 - Confirmado como lacuna: o carregador aceita trilhas, poderes, rituais e itens, mas `trilhas.json`, `poderes.json`, `rituais.json`, `itens_oprgp.json` e `itens_sah.json` continuam vazios. As condições só aplicam os modificadores numéricos presentes em `Condicao.efeitos`; composição, restrições de ação, durações por rodada, automáticas e efeitos temporários ainda não têm o motor completo.
-- O repositório segue público conforme a verificação já registrada. Não inserir conteúdo de livro ou dados privados da campanha em arquivos versionáveis enquanto ele permanecer público; a curadoria dos catálogos permanece pendente.
+- Na rechecagem de 2026-11-04, o repositório ainda constava como público. Depois dessa rechecagem, o proprietário informou que o tornou privado; a curadoria de catálogos segue pendente e conteúdo de terceiros permanece sujeito a autorização.
 - A interface da ficha agora oferece botões de recurso −5/−1/+1/+5 e ajuste digitado, incluindo PV temporários com clamp, auditoria e polling. Há também controles client-side de contraste/fonte e Screen Wake Lock. Eles não são preferências de conta, e o comportamento em aparelhos reais permanece por validar.
 - O motor puro `fichas/efeitos.py` agora detalha por linha os dados-base, modificadores de cada condição, treinamento e bônus situacionais; a view de rolagem usa essa explicação e mantém `parametros_teste` como fonte de quantidade/ordem, inclusive para pools negativas.
 - No painel do mestre, o polling agora ocorre a cada 5 segundos; a aplicação de condição em grupo atende até 50 fichas ativas, exclusiva do mestre, limitada por taxa e auditada ficha a ficha.

@@ -1,7 +1,7 @@
 # MONOTOFOBIA
 Projeto Django da campanha de RPG de mesa "MONOTOFOBIA", dirigida por Samuel Veríssimo.
 
-> **Aviso de privacidade:** o repositório GitHub está público. Não versione fichas com dados pessoais, segredos da campanha, PDFs, textos extraídos ou conteúdo licenciado. Peça ao proprietário do repositório para alterar a visibilidade para privado antes de armazenar qualquer dado da mesa.
+> **Aviso de privacidade:** em 2026-11-04, o proprietário informou que alterou o repositório para privado. Não versione dados pessoais ou segredos sem necessidade, e não adicione PDFs/textos extraídos ou conteúdo licenciado sem autorização. A visibilidade privada não concede direitos de redistribuição.
 
 ## Ambiente local
 

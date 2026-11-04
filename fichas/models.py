@@ -348,6 +348,9 @@ class FichaCondicao(models.Model):
     condicao = models.ForeignKey(Condicao, on_delete=models.PROTECT)
     desde = models.DateTimeField(auto_now_add=True)
     anotacao = models.CharField(max_length=300, blank=True)
+    turnos_restantes = models.PositiveSmallIntegerField(
+        null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(99)],
+    )
     turnos_morrendo = models.PositiveSmallIntegerField(default=0)
 
     class Meta:

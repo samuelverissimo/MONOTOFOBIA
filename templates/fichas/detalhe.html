@@ -361,6 +361,11 @@
                     <li data-active-condition="{{ ficha_condicao.condicao_id }}">
                         <strong>{{ ficha_condicao.condicao.nome }}</strong>
                         <span class="muted">{{ ficha_condicao.condicao.resumo }}</span>
+                        {% if ficha_condicao.turnos_restantes %}
+                            <span class="muted" data-condition-duration="{{ ficha_condicao.condicao_id }}">
+                                Turnos restantes: {{ ficha_condicao.turnos_restantes }}.
+                            </span>
+                        {% endif %}
                         {% if pode_editar and ficha_condicao.condicao.proxima_escalada %}
                             <button class="button button-secondary" type="button"
                                 data-condition-escalate="{{ ficha_condicao.condicao_id }}">
@@ -379,6 +384,8 @@
                     <select id="condition-select">
                         {% for condicao in condicoes_disponiveis %}<option value="{{ condicao.pk }}">{{ condicao.nome }}</option>{% endfor %}
                     </select>
+                    <label for="condition-turns">Duração opcional em turnos</label>
+                    <input id="condition-turns" type="number" min="1" max="99" inputmode="numeric">
                     <button class="button" type="button" data-condition-add>Adicionar</button>
                 </div>
             {% endif %}

@@ -466,15 +466,30 @@ def alterar_recurso(request, pk):
 @require_POST
 @ratelimit(key='user', rate='30/m', method='POST', block=True)
 def alterar_condicao(request, pk):
-    conteudo, erro = _ler_json(request, ('acao', 'condicao'))
+    conteudo, erro = _ler_json(
+        request, ('acao', 'condicao'), opcionais=('turnos_restantes',),
+    )
     if erro:
         return erro
     if type(conteudo['acao']) is not str or conteudo['acao'] not in ('adicionar', 'remover', 'escalar') or type(conteudo['condicao']) is not int:
         return JsonResponse({'erro': 'Operação inválida.'}, status=400)
+    turnos_restantes = conteudo.get('turnos_restantes')
+    if conteudo['acao'] == 'adicionar':
+        if turnos_restantes is not None and (
+            type(turnos_restantes) is not int or not 1 <= turnos_restantes <= 99
+        ):
+            return JsonResponse({'erro': 'A duração deve ser de 1 a 99 turnos.'}, status=400)
+    elif turnos_restantes is not None:
+        return JsonResponse({'erro': 'A duração só pode ser informada ao adicionar.'}, status=400)
     condicao = get_object_or_404(
         Condicao.objects.select_related('proxima_escalada'), pk=conteudo['condicao'],
     )
+    if condicao.slug == 'morrendo' and turnos_restantes is not None:
+        return JsonResponse(
+            {'erro': 'Morrendo usa o contador próprio da cena de combate.'}, status=400,
+        )
     removida = None
+    condicao_ativa = None
     with transaction.atomic():
         ficha = _ficha_editavel(request, pk, bloquear=True)
         if conteudo['acao'] == 'escalar':
@@ -484,13 +499,30 @@ def alterar_condicao(request, pk):
             if ativa is None or condicao.proxima_escalada_id is None:
                 return JsonResponse({'erro': 'Esta condição não pode ser escalada agora.'}, status=400)
             removida = {'id': condicao.pk, 'nome': condicao.nome}
+            turnos_restantes = ativa.turnos_restantes
             FichaCondicao.objects.filter(pk=ativa.pk).delete()
             condicao = condicao.proxima_escalada
-            FichaCondicao.objects.get_or_create(ficha=ficha, condicao=condicao)
+            condicao_ativa, criada = FichaCondicao.objects.get_or_create(
+                ficha=ficha, condicao=condicao,
+                defaults={'turnos_restantes': turnos_restantes},
+            )
+            duracao_anterior = condicao_ativa.turnos_restantes
+            if not criada and duracao_anterior != turnos_restantes:
+                condicao_ativa.turnos_restantes = turnos_restantes
+                condicao_ativa.save(update_fields=('turnos_restantes',))
+                LogAlteracao.objects.create(
+                    ficha=ficha, usuario=request.user, e_mestre=is_mestre(request.user),
+                    campo='condicao.duracao',
+                    valor_antigo='' if duracao_anterior is None else str(duracao_anterior),
+                    valor_novo='' if turnos_restantes is None else str(turnos_restantes),
+                )
             ativa = True
             alterada = True
         elif conteudo['acao'] == 'adicionar':
-            _, criada = FichaCondicao.objects.get_or_create(ficha=ficha, condicao=condicao)
+            condicao_ativa, criada = FichaCondicao.objects.get_or_create(
+                ficha=ficha, condicao=condicao,
+                defaults={'turnos_restantes': turnos_restantes},
+            )
             ativa = True
             alterada = criada
         else:
@@ -502,7 +534,10 @@ def alterar_condicao(request, pk):
                 ficha=ficha, usuario=request.user, e_mestre=is_mestre(request.user),
                 campo='condicao',
                 valor_antigo=removida['nome'] if removida else ('' if ativa else condicao.nome),
-                valor_novo=condicao.nome if ativa else '',
+                valor_novo=(
+                    f'{condicao.nome} (duração: {turnos_restantes} turnos)'
+                    if ativa and turnos_restantes else condicao.nome if ativa else ''
+                ),
             )
     return JsonResponse({
         'condicao': condicao.pk,
@@ -510,6 +545,9 @@ def alterar_condicao(request, pk):
         'resumo': condicao.resumo,
         'ativa': ativa,
         'removida': removida,
+        'turnos_restantes': (
+            condicao_ativa.turnos_restantes if condicao_ativa else None
+        ),
         'proxima_escalada': (
             {'id': condicao.proxima_escalada_id, 'nome': condicao.proxima_escalada.nome}
             if condicao.proxima_escalada_id else None
@@ -1281,12 +1319,13 @@ def atualizacoes_ficha(request, pk):
                 'id': item.pk,
                 'nome': item.nome,
                 'resumo': item.resumo,
+                'turnos_restantes': ficha_condicao.turnos_restantes,
                 'proxima_escalada': (
                     {'id': item.proxima_escalada_id, 'nome': item.proxima_escalada.nome}
                     if item.proxima_escalada_id else None
                 ),
             }
-            for item in condicoes
+            for ficha_condicao, item in zip(condicoes_ativas, condicoes)
         ],
         'defesa': defesa,
         'alvos_rolagem': alvos_rolagem,
@@ -2703,6 +2742,25 @@ def avancar_turno_combate(request, pk):
             ficha = get_object_or_404(fichas_visiveis_para(request.user), pk=participante.ficha_id)
             if not pode_editar_ficha(request.user, ficha):
                 raise PermissionDenied
+            for condicao_temporaria in FichaCondicao.objects.select_for_update().filter(
+                ficha=ficha, turnos_restantes__isnull=False,
+            ).exclude(condicao__slug='morrendo').select_related('condicao'):
+                anterior = condicao_temporaria.turnos_restantes
+                if anterior <= 1:
+                    condicao_temporaria.delete()
+                    LogAlteracao.objects.create(
+                        ficha=ficha, usuario=request.user, e_mestre=True,
+                        campo='condicao', valor_antigo=condicao_temporaria.condicao.nome,
+                        valor_novo='Expirada no início do turno',
+                    )
+                else:
+                    condicao_temporaria.turnos_restantes = anterior - 1
+                    condicao_temporaria.save(update_fields=('turnos_restantes',))
+                    LogAlteracao.objects.create(
+                        ficha=ficha, usuario=request.user, e_mestre=True,
+                        campo='condicao.duracao', valor_antigo=str(anterior),
+                        valor_novo=str(anterior - 1),
+                    )
             morrendo = FichaCondicao.objects.select_for_update().filter(
                 ficha=ficha, condicao__slug='morrendo',
             ).first()
