@@ -16,6 +16,7 @@ from fichas.models import (
     Poder,
     Ritual,
     Trilha,
+    validar_efeitos_condicao,
 )
 from fichas.pre_requisitos import validar_pre_requisitos
 
@@ -131,6 +132,12 @@ class Command(BaseCommand):
         condicoes_por_slug = {}
         registros_condicoes = self._ler('condicoes.json')
         for registro in registros_condicoes:
+            try:
+                validar_efeitos_condicao(registro.get('efeitos', {}))
+            except ValidationError as erro:
+                raise CommandError(
+                    f"Efeitos inválidos para a condição {registro['slug']}."
+                ) from erro
             dados = {
                 key: value
                 for key, value in registro.items()

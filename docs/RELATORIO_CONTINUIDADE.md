@@ -5,15 +5,18 @@ Atualizado em 2026-11-04. Este documento resume o estado conhecido do projeto pa
 ## Estado do repositório
 
 - Projeto: Django para campanha de Ordem Paranormal RPG, workspace `MONOTOFOBIA`.
-- Branch: `main`; no estado de 2026-11-04, `HEAD` e `origin/main` apontam para `7a2f676`. Há alterações locais acumuladas de várias fases, inclusive arquivos novos ainda não rastreados; consulte “Estado de transferência” abaixo.
-- Últimos commits de fase:
+- Branch: `main`; o último estado publicado neste registro é `7ec7639` em `origin/main`. O incremento atual acrescenta validação dos efeitos de condições no carregador, com teste de rollback.
+- Commits publicados nesta rodada:
+  - `7ec7639` `feat: validate power prerequisites and expire scene conditions`
+  - `4faacfc` `feat: complete campaign management foundations`
+- Commits anteriores de fase:
   - `62783a4` `feat(fichas): add rules core and PDF prep`
   - `9c85fcf` `feat(rules): load core catalogs and origins`
   - `1ac6932` `feat(fichas): implement character creation and sheet UI`
   - `3e87251` `feat(fichas): add NEX advancement workflow`
   - `71ab982` `feat(fichas): add manual inventory management`
   - `f62d0fc` `feat(fichas): add table settings and active sheet limits`
-- Os commits de fase passaram pelos hooks Gitleaks e Bandit. Não faça push sem pedido explícito.
+- Os commits publicados passaram pelos hooks Gitleaks e Bandit. O usuário solicitou commit e push para esta rodada; dados locais e catálogos licenciados continuam fora do Git.
 - O remoto GitHub foi verificado como **público**. Não armazene dados da mesa nem material licenciado nele; a privatização depende do proprietário.
 
 ## Ambiente local
@@ -25,7 +28,7 @@ Atualizado em 2026-11-04. Este documento resume o estado conhecido do projeto pa
 - **Atenção à troca de máquina:** `.env`, `db.sqlite3` e os PDFs não vêm do clone. Gere um `.env` novo com chave exclusiva na nova máquina. Se precisar preservar contas/fichas locais, faça backup e transferência segura do SQLite fora do Git. Copie os PDFs para a nova máquina por meio autorizado; não os envie ao remoto.
 - O usuário de desenvolvimento `admin` foi criado anteriormente com senha temporária conhecida. Troque-a com `python manage.py changepassword admin`; não reutilize essa conta/senha em produção. `samukamestre` não deve ser promovido automaticamente: crie/confirme a conta manualmente e rode `python manage.py definir_mestre samukamestre` quando autorizado.
 
-## Estado de transferência (2026-11-04)
+## Registro histórico de transferência (antes dos commits `4faacfc` e `7ec7639`)
 
 - As alterações desta sessão foram gravadas diretamente nos arquivos do workspace. `git status` confirma mudanças locais; não há alterações staged e nenhum commit ou push foi feito. Portanto, não há uma fila pendente de “Keep” do editor para estas mudanças.
 - Um clone novo ou `git pull` em outra máquina **não** recebe alterações locais não commitadas. Para continuar sem commit/push, copie o projeto inteiro com as mudanças, incluindo arquivos novos e não rastreados. Não copie `.venv/`, `.env`, `db.sqlite3`, PDFs, textos extraídos ou dados secretos; transfira banco/PDFs apenas por meio privado e autorizado se forem realmente necessários.
@@ -96,7 +99,7 @@ Para Linux/macOS, ative com `source .venv/bin/activate`; os demais comandos Djan
 6. `check --deploy` foi executado anteriormente em configuração simulada e reportou avisos esperados para desenvolvimento (`DEBUG`, HTTPS e cookies seguros). Ainda não há validação de deploy em ambiente real.
 7. O proprietário deve privatizar o repositório antes de guardar dados confidenciais da mesa ou material licenciado. PDFs e arquivos de `docs/ARQUIVOS SECRETOS/` existem localmente, mas são ignorados pelo Git.
 
-## Verificação atual e transferência
+## Verificação de transferência anterior (snapshot de 2026-11-04)
 
 - Em 2026-11-04, `main` e `origin/main` apontam para `7a2f676`. O worktree contém alterações locais rastreadas e arquivos novos não rastreados, sem alterações staged; não foi feito commit nem push. Uma cópia/clone limpo ou `git pull` **não** inclui esse trabalho.
 - A suíte foi executada novamente neste estado: **97 testes passaram** e o system check do Django não encontrou problemas. `git diff --check` não encontrou erros; Git apenas avisou sobre normalização CRLF/LF.
@@ -106,7 +109,15 @@ Para Linux/macOS, ative com `source .venv/bin/activate`; os demais comandos Djan
 
 Consulte também `docs/COMO_USAR.md` para os fluxos de jogadores e mestre, `docs/MODELOS.md` para os modelos e `docs/COBERTURA.md` para o estado detalhado dos catálogos.
 
-## Rechecagem em 2026-11-04
+## Avanço após o grupo 4
+
+- Condições marcadas para terminar com a cena agora são removidas e auditadas ao encerrar o combate; condições persistentes não são removidas.
+- `Poder.pre_requisitos` usa schema estruturado e cumulativo, com validação no carregador, filtragem de escolhas pela ficha e revalidação no POST.
+- O carregador também rejeita efeitos de condição com campos desconhecidos, booleanos ou valores fora do limite, abortando a transação. Não incluiu dados de catálogo licenciados.
+- Validação deste avanço: **111 testes passaram**, `check` sem problemas, `makemigrations --check --dry-run` sem alterações e `git diff --check` sem erros. Gitleaks e Bandit passaram nos hooks do commit.
+- As lacunas de efeitos dependentes de rodada/ação, catálogo de regras, automação completa de combate e validação em aparelho real continuam pendentes.
+
+## Rechecagem anterior em 2026-11-04
 
 O relatório foi comparado com as views, modelos, templates, JSONs e testes atuais, não apenas com o histórico descrito acima:
 

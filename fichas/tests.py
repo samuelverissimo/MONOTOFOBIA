@@ -2189,3 +2189,34 @@ class CarregarRegrasTests(TestCase):
                     call_command('carregar_regras', stdout=None)
 
         self.assertFalse(Poder.objects.exists())
+
+    def test_loader_rejects_invalid_condition_effects_atomically(self):
+        arquivos = (
+            'atributos.json', 'pericias.json', 'classes.json', 'patentes.json',
+            'origens_oprgp.json', 'origens_sah.json', 'trilhas.json', 'poderes.json',
+            'rituais.json', 'itens_oprgp.json', 'itens_sah.json',
+        )
+        efeitos_invalidos = (
+            {'dados_desconhecidos': -1},
+            {'dados_teste': True},
+            {'dados_teste': 11},
+        )
+
+        for efeitos in efeitos_invalidos:
+            with self.subTest(efeitos=efeitos), TemporaryDirectory() as diretorio:
+                pasta = Path(diretorio)
+                for arquivo in arquivos:
+                    (pasta / arquivo).write_text('[]', encoding='utf-8')
+                (pasta / 'condicoes.json').write_text(json.dumps([{
+                    'slug': 'condicao-invalida',
+                    'nome': 'Condição inválida',
+                    'fonte': 'teste',
+                    'resumo': '',
+                    'efeitos': efeitos,
+                }]), encoding='utf-8')
+
+                with patch('fichas.management.commands.carregar_regras.DATA_DIR', pasta):
+                    with self.assertRaises(CommandError):
+                        call_command('carregar_regras', stdout=None)
+
+                self.assertFalse(Condicao.objects.exists())
