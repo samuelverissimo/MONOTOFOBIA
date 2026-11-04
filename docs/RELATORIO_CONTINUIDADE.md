@@ -5,8 +5,12 @@ Atualizado em 2026-11-04. Este documento resume o estado conhecido do projeto pa
 ## Estado do repositório
 
 - Projeto: Django para campanha de Ordem Paranormal RPG, workspace `MONOTOFOBIA`.
-- Branch: `main`; o último estado publicado antes desta rodada era `6b8a570` em `origin/main`.
+- Branch: `main`; checklist reavaliada sobre o estado publicado `8dddfff` em `origin/main`.
 - Commits publicados nesta rodada:
+  - `8dddfff` `docs: record combat condition restrictions release`
+  - `d854d28` `feat: enforce condition action restrictions in combat`
+  - `fc283ba` `docs: record timed condition release`
+  - `2e38cc9` `feat: add per-condition combat turn durations`
   - `611d27b` `fix: validate condition effects when loading rules`
   - `7ec7639` `feat: validate power prerequisites and expire scene conditions`
   - `4faacfc` `feat: complete campaign management foundations`
@@ -19,6 +23,28 @@ Atualizado em 2026-11-04. Este documento resume o estado conhecido do projeto pa
   - `f62d0fc` `feat(fichas): add table settings and active sheet limits`
 - Os commits publicados passaram pelos hooks Gitleaks e Bandit. O usuário solicitou commit e push para esta rodada; dados locais e catálogos licenciados continuam fora do Git.
 - Em 2026-11-04, o proprietário informou que tornou o remoto GitHub privado. Ainda não armazene conteúdo de terceiros sem autorização; acesso privado não altera direitos autorais.
+
+## Checklist das fases (revisada em 2026-11-04)
+
+**Legenda:** ✅ concluída no escopo descrito; 🟡 parcial; ⬜ pendente. “Concluída” refere-se aos recursos enumerados, não a uma garantia de segurança ou prontidão de produção.
+
+| Fase | Status | Já feito no sistema | Ainda falta |
+|---|---|---|---|
+| 0 — Correções e fundações | ✅ | Autenticação/permissões, base de fichas, rolagens físicas/digitais, recursos auditados, verificações de migração e correções de fluxo. | Revalidações contínuas de segurança e produção estão na Fase 12. |
+| 1 — Catálogos de regras | 🟡 | Atributos, perícias, classes/progressões, condições, patentes e origens carregados; carregador idempotente; schema cumulativo e validação de pré-requisitos; validação dos efeitos das condições. | `trilhas.json`, `poderes.json`, `rituais.json`, `itens_oprgp.json` e `itens_sah.json` estão vazios. Faltam curadoria autorizada, validação dos dados e conferência visual das páginas-imagem marcadas “a conferir”. |
+| 2 — Motor de condições e efeitos | 🟡 | Modificadores numéricos em testes/Defesa, escaladas e auditoria; expiração no fim da cena; duração opcional de 1–99 turnos por ficha; bloqueios diretos para Atordoado/Pasmo, Enjoado e Inconsciente. | Resolver efeitos que dependem de contexto (ações mentais, alvos, deslocamento, percepção, início/fim de rodada), composição/interações e durações específicas do catálogo ainda não automatizadas. |
+| 3 — Modo Presencial | ✅ | Fluxos físicos para rolagens/iniciativa/dano, modo de sessão com contraste/fonte e tentativa de Screen Wake Lock; combate assistido presencialmente. | Testar usabilidade e compatibilidade em aparelhos reais. Não é um tabuleiro virtual. |
+| 4 — Painel do mestre e turnos | ✅ | Cards e polling do painel, nova cena, histórico filtrado de rolagens, aplicação de condição em grupo e rastreador com participantes, ordem, ações, reações e gastos PE/PD por turno. | Automatizações de combate descritas nas Fases 2 e 5 permanecem fora deste painel básico. |
+| 5 — Poderes, rituais e combate/paranormal | 🟡 | Ficha registra escolhas personalizadas ou de catálogo; pré-requisitos estruturados filtram e revalidam escolhas. Teste de ataque, dano físico informado e aplicação auditada a fichas estão disponíveis. | Catálogos ainda vazios; faltam execução/custo/efeitos automáticos de poderes e rituais, combate completo, reações e resolução paranormal automatizada. |
+| 6 — Evolução e campanha | 🟡 | NEX, níveis, estágios, patentes/prestígio, escolhas pendentes, configuração da mesa, sessão, arquivamento e histórico/auditoria. | Ainda não há gestão completa de campanhas/projetos separados; catálogos impedem algumas escolhas padrão, e gatilhos de dano massivo/recuperação contextual seguem manuais. |
+| 7 — Equipamento | 🟡 | Inventário manual, espaços/carga, estado de itens, penalidades de sobrecarga e escolha de kit. Modelos aceitam dados de catálogo. | Catálogos de armas, proteções, equipamentos e itens amaldiçoados estão vazios; falta aplicar automaticamente propriedades e efeitos de equipamento. |
+| 8 — Cenas | ✅ | Cenas com estado público/oculto, descrição para jogadores/notas privadas, pistas reveláveis e operações do mestre auditadas. | Recursos narrativos além do fluxo de cenas/pistas ainda entram nas fases 9 e 10. |
+| 9 — Bestiário, geradores, mural/mensagens, Ficha de Série e regras da casa | 🟡 | Bestiário privado do mestre, campos editáveis/auditados e vínculo de ameaça ao combate. | Geradores, mural/mensagens, Ficha de Série e regras da casa não implementados; bestiário não gerencia PV atual nem automatiza ações/dano. |
+| 10 — Utilidades e PWA | 🟡 | Manifesto, service worker, instalação e fallback offline genérico; cache limitado a recursos estáticos, sem dados autenticados. | Utilidades extras não estão especificadas/implementadas; validar instalação e offline em dispositivos/navegadores reais e HTTPS de produção. |
+| 11 — Contas e segurança | ✅ | Cadastro/login com normalização, validação, rate limit/bloqueio, CSRF, permissões, filtragem de fichas, proteção de notas e auditoria, cobertos por testes. | Revisão contínua continua necessária; configuração real de produção e resposta operacional a incidentes não foram validadas nesta máquina. |
+| 12 — Revisão final | 🟡 | 114 testes passam; `check`, migrações e hooks Gitleaks/Bandit verificados; pip-audit e `check --deploy` foram executados anteriormente em contexto local/CI simulado. | Deploy real, acessibilidade e mobile em aparelho, teste completo de vazamento mestre/jogador, concorrência/IDOR abrangentes e repetição documentada de todas as ferramentas no estado atual. |
+
+**Resumo:** 5 fases concluídas (0, 3, 4, 8, 11), 8 parciais (1, 2, 5, 6, 7, 9, 10, 12) e nenhuma totalmente pendente. As maiores dependências são completar catálogos com fontes autorizadas e terminar regras/combate contextual; tornar o repositório privado não equivale a licença para redistribuir conteúdo.
 
 ## Ambiente local
 
