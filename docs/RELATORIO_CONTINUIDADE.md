@@ -127,6 +127,7 @@ Consulte também `docs/COMO_USAR.md` para os fluxos de jogadores e mestre, `docs
 - Esta funcionalidade não presume duração de nenhum efeito do catálogo: o mestre/jogador autorizado informa a duração da instância. Ainda falta automatizar efeitos dependentes de ação e validação de regras específicas.
 - Verificação desta continuação: **114 testes passaram**, incluindo validação dos limites, decremento/expiração, auditoria, polling, escalada, restrições de ação e separação do contador de Morrendo. `check`, `makemigrations --check --dry-run` e `git diff --check` sem problemas.
 - O rastreador agora também aplica no servidor as restrições de ação de Atordoado/Pasmo, Enjoado e Inconsciente. Restrições dependentes de contexto (ações mentais, alvos, alcance, etc.) seguem pendentes.
+- Essas restrições foram publicadas em `d854d28`; `main` está sincronizada com `origin/main`.
 
 ## Rechecagem anterior em 2026-11-04
 
