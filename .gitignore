@@ -7,6 +7,7 @@ db.sqlite3
 .env.*
 !.env.example
 *.log
+logs/
 media/
 staticfiles/
 .pytest_cache/

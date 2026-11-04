@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Bestiário do mestre | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<div class="page form-page">
+    <header class="topbar">
+        <a href="{% url 'painel_mestre' %}">Voltar ao painel</a>
+        <a href="{% url 'lista_cenas' %}">Cenas da mesa</a>
+    </header>
+    <main>
+        <h1>Bestiário do mestre</h1>
+        <p>Registre ameaças próprias ou autorizadas. Estes dados ficam disponíveis apenas ao mestre.</p>
+        <section aria-labelledby="create-threat-heading">
+            <h2 id="create-threat-heading">Adicionar ameaça</h2>
+            <form method="post" action="{% url 'criar_ameaca' %}">
+                {% csrf_token %}
+                {{ formulario.as_p }}
+                <button class="button" type="submit">Adicionar ao bestiário</button>
+            </form>
+        </section>
+        <section aria-labelledby="threat-list-heading">
+            <h2 id="threat-list-heading">Ameaças registradas</h2>
+            {% for ameaca in ameacas %}
+                <article class="card">
+                    <h3>{{ ameaca.nome }}{% if not ameaca.ativa %} · Arquivada{% endif %}</h3>
+                    <form method="post" action="{% url 'editar_ameaca' ameaca.pk %}">
+                        {% csrf_token %}
+                        <p>{{ ameaca.get_categoria_display }} · Defesa {{ ameaca.defesa|default_if_none:'—' }} · PV {{ ameaca.pv|default_if_none:'—' }}</p>
+                        {{ ameaca.formulario_edicao.as_p }}
+                        <button class="button button-secondary" type="submit">Salvar alterações</button>
+                    </form>
+                    <form method="post" action="{% url 'alterar_estado_ameaca' ameaca.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="ativa" value="{% if ameaca.ativa %}0{% else %}1{% endif %}">
+                        <button class="button button-secondary" type="submit">{% if ameaca.ativa %}Arquivar{% else %}Reativar{% endif %}</button>
+                    </form>
+                </article>
+            {% empty %}
+                <p>Nenhuma ameaça registrada.</p>
+            {% endfor %}
+        </section>
+    </main>
+</div>
+{% endblock %}

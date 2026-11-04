@@ -4,7 +4,18 @@ from pathlib import Path
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from fichas.models import Atributo, Classe, Condicao, Origem, Patente, Pericia
+from fichas.models import (
+    Atributo,
+    Classe,
+    Condicao,
+    ItemCatalogo,
+    Origem,
+    Patente,
+    Pericia,
+    Poder,
+    Ritual,
+    Trilha,
+)
 
 
 DATA_DIR = Path(__file__).resolve().parents[2] / 'dados'
@@ -67,6 +78,46 @@ class Command(BaseCommand):
                 if len(pericias) != len(set(slugs_pericias)):
                     raise CommandError(f'Perícia referenciada ausente na origem {origem.slug}.')
                 origem.pericias_treinadas.set(pericias)
+
+        for registro in self._ler('trilhas.json'):
+            classe_slug = registro.get('classe_slug')
+            classe = Classe.objects.filter(slug=classe_slug).first()
+            if classe is None:
+                raise CommandError(f'Classe {classe_slug} ausente na trilha {registro["slug"]}.')
+            dados = {
+                key: value
+                for key, value in registro.items()
+                if key in {'nome', 'fonte', 'personalizado', 'resumo', 'habilidades'}
+            }
+            objeto, criado = Trilha.objects.update_or_create(
+                slug=registro['slug'], defaults={**dados, 'classe': classe},
+            )
+            contagens['criados' if criado else 'atualizados'] += 1
+
+        for arquivo, modelo, campos in (
+            ('poderes.json', Poder, {
+                'nome', 'fonte', 'personalizado', 'resumo', 'tipo', 'pre_requisitos', 'custo',
+            }),
+            ('rituais.json', Ritual, {
+                'nome', 'fonte', 'personalizado', 'resumo', 'circulo', 'elemento',
+                'execucao', 'alcance', 'alvo_area', 'duracao', 'resistencia', 'custo',
+            }),
+            ('itens_oprgp.json', ItemCatalogo, {
+                'nome', 'fonte', 'personalizado', 'resumo', 'categoria', 'espacos', 'tipo',
+                'proficiencia', 'tipo_arma', 'empunhadura', 'dano', 'critico_margem',
+                'critico_multiplicador', 'alcance', 'tipo_dano', 'bonus_defesa',
+                'campos_adicionais',
+            }),
+            ('itens_sah.json', ItemCatalogo, {
+                'nome', 'fonte', 'personalizado', 'resumo', 'categoria', 'espacos', 'tipo',
+                'proficiencia', 'tipo_arma', 'empunhadura', 'dano', 'critico_margem',
+                'critico_multiplicador', 'alcance', 'tipo_dano', 'bonus_defesa',
+                'campos_adicionais',
+            }),
+        ):
+            for registro in self._ler(arquivo):
+                _, criado = self._atualizar(modelo, registro, campos=campos)
+                contagens['criados' if criado else 'atualizados'] += 1
 
         condicoes_por_slug = {}
         registros_condicoes = self._ler('condicoes.json')

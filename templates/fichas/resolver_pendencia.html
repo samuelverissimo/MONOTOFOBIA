@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Resolver escolha · MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<main class="page form-page">
+    <a href="{% url 'fichas:detalhe' ficha.pk %}">Voltar à ficha</a>
+    <h1>Resolver escolha</h1>
+    <p>{{ pendencia.descricao }} <span class="muted">{{ pendencia.fonte }}</span></p>
+    <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button class="button" type="submit">Confirmar escolha</button>
+    </form>
+</main>
+{% endblock %}

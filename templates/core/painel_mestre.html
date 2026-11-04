@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Painel do mestre | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<div class="page" data-master-dashboard
+    data-poll-url="{% url 'painel_mestre_atualizacoes' %}"
+    data-roll-cursor="{{ cursor_rolagens }}">
+    <header class="topbar">
+        <a href="{% url 'home' %}">Voltar às fichas</a>
+        <nav aria-label="Ações do mestre">
+            <a href="{% url 'fichas:configurar_mesa' %}">Configurar mesa</a>
+            <a href="{% url 'fichas:encontros_combate' %}">Combates</a>
+            <a href="{% url 'lista_cenas' %}">Cenas da mesa</a>
+            <a href="{% url 'lista_ameacas' %}">Bestiário</a>
+        </nav>
+    </header>
+    <main>
+        <h1>Painel do mestre</h1>
+        <section aria-labelledby="session-control-heading">
+            <h2 id="session-control-heading">Sessão {{ numero_sessao }}</h2>
+            <p>Iniciar uma nova sessão renova habilidades limitadas a uma vez por sessão.</p>
+            <form method="post" action="{% url 'iniciar_nova_sessao' %}">
+                {% csrf_token %}
+                <button class="button button-secondary" type="submit">Iniciar nova sessão</button>
+            </form>
+        </section>
+        <section aria-labelledby="sheet-summary-heading">
+            <h2 id="sheet-summary-heading">Fichas por status</h2>
+            <ul class="master-summary" data-master-summary>
+                {% for contagem in contagens_status %}
+                    <li data-status-count="{{ contagem.valor }}">{{ contagem.rotulo }}: {{ contagem.total }}</li>
+                {% empty %}
+                    <li>Nenhuma ficha cadastrada.</li>
+                {% endfor %}
+            </ul>
+        </section>
+        <section aria-labelledby="all-sheets-heading">
+            <h2 id="all-sheets-heading">Fichas da mesa</h2>
+            <form method="post" action="{% url 'aplicar_condicao_grupo' %}">
+                {% csrf_token %}
+                <label for="group-condition">Aplicar condição a fichas ativas</label>
+                <select id="group-condition" name="condicao" required>
+                    {% for condicao in condicoes %}
+                        <option value="{{ condicao.pk }}">{{ condicao.nome }}</option>
+                    {% empty %}
+                        <option value="">Nenhuma condição cadastrada</option>
+                    {% endfor %}
+                </select>
+                <ul class="sheet-list" data-master-sheet-list>
+                    {% for ficha in fichas %}
+                        <li data-master-sheet="{{ ficha.pk }}">
+                            {% if ficha.status == 'ativa' %}
+                                <label><input type="checkbox" name="fichas" value="{{ ficha.pk }}"> Selecionar</label>
+                            {% endif %}
+                            <a href="{% url 'fichas:detalhe' ficha.pk %}">{{ ficha.nome }}</a>
+                            <span>{{ ficha.dono.username }} · {{ ficha.classe|default:'Sem classe' }} · {{ ficha.get_status_display }}</span>
+                        </li>
+                    {% empty %}
+                        <li>Nenhuma ficha cadastrada.</li>
+                    {% endfor %}
+                </ul>
+                <button class="button button-secondary" type="submit">Aplicar condição selecionada</button>
+            </form>
+        </section>
+        <section aria-labelledby="recent-rolls-heading">
+            <h2 id="recent-rolls-heading">Rolagens recentes</h2>
+            <ol class="master-roll-list" data-master-roll-list>
+                {% for rolagem in rolagens_recentes %}
+                    <li data-master-roll="{{ rolagem.pk }}">
+                        <span>{{ rolagem.ficha.nome }} · {{ rolagem.descricao }} · [{{ rolagem.dados|join:', ' }}] + {{ rolagem.bonus }} = {{ rolagem.total }}</span>
+                        <span class="muted">{{ rolagem.usuario.username }} · {{ rolagem.criada_em|date:'d/m/Y H:i' }}{% if rolagem.secreta %} · Secreta{% endif %}</span>
+                    </li>
+                {% empty %}
+                    <li data-empty-rolls>Nenhuma rolagem registrada.</li>
+                {% endfor %}
+            </ol>
+        </section>
+        <p class="feedback" data-master-feedback role="status" aria-live="polite"></p>
+    </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+    {% load static %}
+    <script src="{% static 'js/mesa.js' %}" defer></script>
+{% endblock %}

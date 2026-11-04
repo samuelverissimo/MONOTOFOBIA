@@ -7,6 +7,9 @@
     <header class="topbar">
         <p>Olá, {{ user.username }}</p>
         <nav aria-label="Conta">
+            <a href="{% url 'lista_cenas' %}">Cenas da mesa</a>
+            <a href="{% url 'fichas:historico_rolagens' %}">Histórico de rolagens</a>
+            {% if user.is_superuser %}<a href="{% url 'painel_mestre' %}">Painel do mestre</a>{% endif %}
             {% if user.is_superuser %}<a href="{% url 'fichas:configurar_mesa' %}">Configurar mesa</a>{% endif %}
             <a href="{% url 'password_change' %}">Alterar senha</a>
             <form method="post" action="{% url 'logout' %}">

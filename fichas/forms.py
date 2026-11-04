@@ -1,7 +1,24 @@
 from django import forms
+
+from core.models import AmeacaMesa
 from django.core.exceptions import ValidationError
 
-from fichas.models import Classe, ConfiguracaoMesa, Ficha, ItemCatalogo, ItemInventario, Origem, Pericia
+from fichas.models import (
+    Classe,
+    ConfiguracaoMesa,
+    EncontroCombate,
+    Ficha,
+    FerimentoDebilitante,
+    ItemCatalogo,
+    ItemInventario,
+    ParticipanteCombate,
+    Origem,
+    RegistroPrestigio,
+    Pericia,
+    Poder,
+    Ritual,
+    Trilha,
+)
 from fichas.regras import ATRIBUTOS, NEX_VALIDOS, pericias_treinadas_disponiveis, validar_atributos_iniciais
 
 
@@ -189,6 +206,159 @@ class AvancoNexForm(forms.Form):
         ]
 
 
+class AvancoNivelForm(forms.Form):
+    nivel_novo = forms.ChoiceField(label='Novo nível de experiência')
+    versao = forms.IntegerField(widget=forms.HiddenInput)
+
+    def __init__(self, *args, nivel_atual, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['nivel_novo'].choices = [
+            (nivel, str(nivel)) for nivel in range(nivel_atual + 1, 21)
+        ]
+
+
+class ExposicaoParanormalForm(forms.Form):
+    exposicao = forms.ChoiceField(
+        label='Exposição paranormal',
+        choices=(
+            ('branda', 'Branda (+0% NEX)'),
+            ('moderada', 'Moderada (+1% NEX)'),
+            ('profunda', 'Profunda (+2% NEX)'),
+            ('total', 'Total (+5% NEX)'),
+            ('ritual_1', 'Aprender ritual de 1º círculo (+1% NEX)'),
+            ('ritual_2', 'Aprender ritual de 2º círculo (+2% NEX)'),
+            ('ritual_3', 'Aprender ritual de 3º círculo (+3% NEX)'),
+            ('ritual_4', 'Aprender ritual de 4º círculo (+4% NEX)'),
+        ),
+    )
+    versao = forms.IntegerField(widget=forms.HiddenInput)
+
+    def __init__(self, *args, nex_atual, **kwargs):
+        self.nex_atual = nex_atual
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        dados = super().clean()
+        exposicao = dados.get('exposicao')
+        incrementos = {
+            'branda': 0, 'moderada': 1, 'profunda': 2, 'total': 5,
+            'ritual_1': 1, 'ritual_2': 2, 'ritual_3': 3, 'ritual_4': 4,
+        }
+        if exposicao and self.nex_atual + incrementos[exposicao] > 99:
+            self.add_error('exposicao', 'O NEX não pode ultrapassar 99%.')
+        return dados
+
+
+class RegistroPrestigioForm(forms.Form):
+    evento = forms.ChoiceField(label='Evento da missão', choices=RegistroPrestigio.EVENTOS)
+    quantidade = forms.IntegerField(label='Quantidade', min_value=1, max_value=999, initial=1)
+    versao = forms.IntegerField(widget=forms.HiddenInput)
+    numero_sessao = forms.IntegerField(widget=forms.HiddenInput)
+
+    def clean(self):
+        dados = super().clean()
+        evento = dados.get('evento')
+        quantidade = dados.get('quantidade')
+        if evento in {'solucao', 'pista'} and quantidade != 1:
+            self.add_error('quantidade', 'Registre uma solução ou pista por vez.')
+        return dados
+
+
+class RecuperacaoPatenteForm(forms.Form):
+    recurso = forms.ChoiceField(
+        label='Recurso para recuperar',
+        choices=(('pv_atual', 'PV (dormir)'), ('pd_atual', 'PD (relaxar)')),
+    )
+    versao = forms.IntegerField(widget=forms.HiddenInput)
+
+
+class AvancoEstagioForm(forms.Form):
+    estagio_novo = forms.ChoiceField(label='Novo estágio')
+    versao = forms.IntegerField(widget=forms.HiddenInput)
+
+    def __init__(self, *args, estagio_atual, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['estagio_novo'].choices = [
+            (estagio, str(estagio)) for estagio in range(estagio_atual + 1, 6)
+        ]
+
+
+class CicatrizadoForm(forms.Form):
+    elemento = forms.ChoiceField(
+        label='Elemento do perigo',
+        choices=Ficha.ELEMENTOS_CICATRIZADO,
+    )
+    perigo = forms.CharField(
+        label='Perigo específico enfrentado',
+        max_length=120,
+        help_text='Ex.: uma criatura ou manifestação ligada ao elemento escolhido.',
+    )
+
+
+class UsarCicatrizadoForm(forms.Form):
+    efeito = forms.ChoiceField(
+        label='Reação de Cicatrizado',
+        choices=(
+            ('ignorar_mental', 'Sacrificar 1 PV máximo para ignorar dano mental'),
+            ('ignorar_custo', 'Sacrificar 1 PV máximo para ignorar um custo de PE/PD'),
+            ('reduzir_fisico', 'Sacrificar 1 ponto máximo de PE/PD para reduzir dano físico à metade'),
+        ),
+    )
+    dano_fisico = forms.IntegerField(
+        label='Dano físico recebido',
+        min_value=1,
+        max_value=10000,
+        required=False,
+    )
+
+    def clean(self):
+        dados = super().clean()
+        if dados.get('efeito') == 'reduzir_fisico' and dados.get('dano_fisico') is None:
+            self.add_error('dano_fisico', 'Informe o dano físico antes de aplicar a redução.')
+        elif dados.get('efeito') != 'reduzir_fisico':
+            dados['dano_fisico'] = None
+        return dados
+
+
+class FerimentoDebilitanteForm(forms.Form):
+    acoes = (
+        ('registrar', 'Registrar novo ferimento'),
+        ('tratamento', 'Registrar sucesso em Medicina (DT 20)'),
+        ('curar', 'Registrar recuperação após dormir'),
+    )
+    acao = forms.ChoiceField(label='Ação', choices=acoes)
+    atributo = forms.ChoiceField(
+        label='Atributo afetado',
+        choices=FerimentoDebilitante.ATRIBUTOS,
+        required=False,
+    )
+    ferimento = forms.ModelChoiceField(
+        label='Ferimento',
+        queryset=FerimentoDebilitante.objects.none(),
+        required=False,
+    )
+
+    def __init__(self, *args, ficha, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['ferimento'].queryset = ficha.ferimentos.filter(
+            curado_em__isnull=True,
+        ).order_by('criado_em', 'pk')
+
+    def clean(self):
+        dados = super().clean()
+        if dados.get('acao') == 'registrar':
+            if not dados.get('atributo'):
+                self.add_error('atributo', 'Escolha o atributo afetado pelo ferimento.')
+            if dados.get('ferimento'):
+                self.add_error('ferimento', 'Não selecione um ferimento ao registrar outro.')
+        elif dados.get('acao') in ('tratamento', 'curar'):
+            if not dados.get('ferimento'):
+                self.add_error('ferimento', 'Escolha um ferimento ativo.')
+            if dados.get('atributo'):
+                self.add_error('atributo', 'Não escolha um atributo ao atualizar um ferimento.')
+        return dados
+
+
 class ItemInventarioForm(forms.Form):
     nome = forms.CharField(label='Item', max_length=120)
     categoria = forms.ChoiceField(label='Categoria', choices=ItemCatalogo.CATEGORIAS)
@@ -203,10 +373,101 @@ class ItemInventarioAjusteForm(forms.Form):
     estado = forms.ChoiceField(choices=ItemInventario.ESTADOS)
 
 
+class EncontroCombateForm(forms.ModelForm):
+    class Meta:
+        model = EncontroCombate
+        fields = ('nome',)
+        labels = {'nome': 'Nome da cena de combate'}
+
+
+class ParticipanteCombateForm(forms.ModelForm):
+    ficha = forms.ModelChoiceField(
+        queryset=Ficha.objects.none(), label='Ficha da mesa (opcional)', required=False,
+    )
+    ameaca = forms.ModelChoiceField(
+        queryset=AmeacaMesa.objects.none(),
+        label='Ameaça do bestiário (opcional)',
+        required=False,
+    )
+
+    class Meta:
+        model = ParticipanteCombate
+        fields = ('ficha', 'ameaca', 'nome', 'iniciativa', 'surpreendido')
+        labels = {
+            'nome': 'Nome do participante ou ameaça',
+            'iniciativa': 'Resultado de Iniciativa',
+            'surpreendido': 'Surpreendido na primeira rodada',
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['ficha'].queryset = Ficha.objects.filter(status='ativa').order_by('nome')
+        self.fields['ameaca'].queryset = AmeacaMesa.objects.filter(ativa=True).order_by('nome')
+        self.fields['nome'].required = False
+        self.fields['iniciativa'].help_text = 'Role Iniciativa fisicamente e informe o total.'
+
+    def clean(self):
+        dados = super().clean()
+        ficha = dados.get('ficha')
+        ameaca = dados.get('ameaca')
+        nome = dados.get('nome', '').strip()
+        if ficha:
+            if ameaca:
+                self.add_error('ameaca', 'Selecione uma ficha ou uma ameaça, não ambas.')
+            dados['nome'] = ficha.nome
+        elif ameaca and not nome:
+            dados['nome'] = ameaca.nome
+        elif not nome:
+            self.add_error('nome', 'Informe o nome da ameaça ou selecione uma ficha.')
+        return dados
+
+
+class DanoCombateForm(forms.Form):
+    dano = forms.IntegerField(label='Dano físico', min_value=1, max_value=1000)
+
+
 class ConfiguracaoMesaForm(forms.Form):
     modo_recursos = forms.ChoiceField(label='Modo de recursos', choices=ConfiguracaoMesa.MODOS_RECURSOS)
-    jogador_pode_subir_nex = forms.BooleanField(label='Jogadores podem avançar NEX', required=False)
+    sistema_progressao = forms.ChoiceField(
+        label='Sistema de progressão',
+        choices=ConfiguracaoMesa.PROGRESSOES,
+    )
+    jogador_pode_subir_nex = forms.BooleanField(
+        label='Jogadores podem avançar a progressão', required=False,
+    )
+    ferimentos_debilitantes = forms.BooleanField(
+        label='Usar Ferimentos Debilitantes',
+        required=False,
+    )
     max_fichas_ativas = forms.IntegerField(label='Máximo de fichas ativas', min_value=1, max_value=20)
+
+    def __init__(self, *args, sistema_progressao_atual=None, **kwargs):
+        self.sistema_progressao_atual = sistema_progressao_atual
+        super().__init__(*args, **kwargs)
+
+    def clean_sistema_progressao(self):
+        sistema = self.cleaned_data['sistema_progressao']
+        if (
+            self.sistema_progressao_atual
+            and sistema != self.sistema_progressao_atual
+            and Ficha.objects.exists()
+        ):
+            raise ValidationError(
+                'Não é possível trocar a progressão depois que fichas foram criadas.'
+            )
+        return sistema
+
+    def clean(self):
+        dados = super().clean()
+        if (
+            dados.get('sistema_progressao') == 'patentes'
+            and dados.get('modo_recursos') != 'sem_sanidade'
+        ):
+            self.add_error(
+                'modo_recursos',
+                'A evolução por patentes usa o modo Sem Sanidade (PV e PD).',
+            )
+        return dados
 
 
 class FichaStatusForm(forms.Form):
@@ -214,3 +475,133 @@ class FichaStatusForm(forms.Form):
         choices=[(valor, rotulo) for valor, rotulo in Ficha.STATUS if valor in ('ativa', 'arquivada')],
     )
     versao = forms.IntegerField(widget=forms.HiddenInput)
+
+
+class PendenciaAtributoForm(forms.Form):
+    atributo = forms.ChoiceField(
+        label='Atributo a aumentar',
+        choices=[(nome, nome.replace('_', ' ').capitalize()) for nome in ATRIBUTOS],
+    )
+
+    def __init__(self, *args, ficha, **kwargs):
+        self.ficha = ficha
+        super().__init__(*args, **kwargs)
+
+    def clean_atributo(self):
+        atributo = self.cleaned_data['atributo']
+        if getattr(self.ficha, atributo) >= 5:
+            raise ValidationError('Esse atributo já está no limite.')
+        return atributo
+
+
+class PendenciaTreinamentoForm(forms.Form):
+    pericias = forms.ModelMultipleChoiceField(
+        queryset=Pericia.objects.none(),
+        label='Perícias para aprimorar',
+        widget=forms.CheckboxSelectMultiple,
+    )
+
+    def __init__(self, *args, ficha, quantidade, **kwargs):
+        self.quantidade = quantidade
+        super().__init__(*args, **kwargs)
+        expert_ids = ficha.pericias.filter(grau='expert').values_list('pericia_id', flat=True)
+        self.fields['pericias'].queryset = Pericia.objects.exclude(
+            pk__in=expert_ids,
+        ).order_by('nome')
+        self.fields['pericias'].help_text = f'Selecione exatamente {quantidade} perícia(s).'
+
+    def clean_pericias(self):
+        pericias = self.cleaned_data['pericias']
+        if len(pericias) != self.quantidade:
+            raise ValidationError(f'Selecione exatamente {self.quantidade} perícia(s).')
+        return pericias
+
+
+class PendenciaTrilhaForm(forms.Form):
+    trilha = forms.ModelChoiceField(
+        queryset=Trilha.objects.none(),
+        label='Trilha',
+        empty_label='Escolha uma trilha do catálogo (opcional)',
+        required=False,
+    )
+    nome_personalizado = forms.CharField(label='Nome da trilha', max_length=120, required=False)
+    resumo_personalizado = forms.CharField(
+        label='Resumo mecânico curto',
+        max_length=500,
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 3}),
+    )
+
+    def __init__(self, *args, ficha, **kwargs):
+        super().__init__(*args, **kwargs)
+        if ficha.classe_id:
+            self.fields['trilha'].queryset = Trilha.objects.filter(
+                classe_id=ficha.classe_id,
+            ).order_by('nome')
+
+    def clean(self):
+        dados = super().clean()
+        if not dados.get('trilha') and not (
+            dados.get('nome_personalizado') and dados.get('resumo_personalizado')
+        ):
+            raise ValidationError('Escolha uma trilha do catálogo ou informe nome e resumo mecânico curto.')
+        return dados
+
+
+class PendenciaPoderForm(forms.Form):
+    poder = forms.ModelChoiceField(
+        queryset=Poder.objects.none(),
+        label='Poder do catálogo (opcional)',
+        required=False,
+    )
+    nome_personalizado = forms.CharField(label='Nome', max_length=120, required=False)
+    resumo_personalizado = forms.CharField(
+        label='Resumo mecânico curto',
+        max_length=500,
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 3}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['poder'].queryset = Poder.objects.order_by('nome')
+
+    def clean(self):
+        dados = super().clean()
+        if not dados.get('poder') and not (dados.get('nome_personalizado') and dados.get('resumo_personalizado')):
+            raise ValidationError('Escolha um poder do catálogo ou informe nome e resumo mecânico curto.')
+        return dados
+
+
+class PendenciaRitualForm(forms.Form):
+    ritual = forms.ModelChoiceField(
+        queryset=Ritual.objects.none(),
+        label='Ritual do catálogo (opcional)',
+        required=False,
+    )
+    nome_personalizado = forms.CharField(label='Nome', max_length=120, required=False)
+    resumo_personalizado = forms.CharField(
+        label='Resumo mecânico curto',
+        max_length=500,
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 3}),
+    )
+    circulo_personalizado = forms.ChoiceField(
+        label='Círculo do ritual',
+        choices=[(circulo, f'{circulo}º') for circulo in range(1, 5)],
+        required=False,
+    )
+
+    def __init__(self, *args, nivel_nex=False, **kwargs):
+        self.nivel_nex = nivel_nex
+        super().__init__(*args, **kwargs)
+        self.fields['ritual'].queryset = Ritual.objects.order_by('nome')
+        self.fields['circulo_personalizado'].required = nivel_nex
+
+    def clean(self):
+        dados = super().clean()
+        if not dados.get('ritual') and not (dados.get('nome_personalizado') and dados.get('resumo_personalizado')):
+            raise ValidationError('Escolha um ritual do catálogo ou informe nome e resumo mecânico curto.')
+        if dados.get('ritual'):
+            dados['circulo_personalizado'] = str(dados['ritual'].circulo)
+        return dados

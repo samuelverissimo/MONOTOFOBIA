@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "MONOTOFOBIA",
+  "short_name": "MONOTOFOBIA",
+  "description": "Ferramentas privadas para a mesa MONOTOFOBIA.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#111111",
+  "theme_color": "#111111",
+  "icons": [
+    {
+      "src": "/static/icons/monotofobia.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

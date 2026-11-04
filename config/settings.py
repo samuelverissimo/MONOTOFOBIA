@@ -102,7 +102,7 @@ TIME_ZONE = 'America/Recife'
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 
 LOGIN_URL = 'login'
@@ -135,8 +135,8 @@ else:
     # Após confirmar HTTPS permanente, aumente gradualmente para 31536000.
     SECURE_HSTS_SECONDS = 3600
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    # Preload pode manter o domínio inacessível por HTTP até após a remoção da lista.
-    SECURE_HSTS_PRELOAD = True
+    # Preload exige HSTS de pelo menos um ano; manter desligado durante a adoção gradual.
+    SECURE_HSTS_PRELOAD = False
 
 # Use atrás de proxy reverso confiável (como Heroku/Render) que sobrescreva este cabeçalho.
 # SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

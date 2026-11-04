@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}{{ encontro.nome }} | Combate{% endblock %}
+
+{% block content %}
+<div class="page combat-page">
+    <header class="topbar">
+        <a href="{% url 'fichas:encontros_combate' %}">Voltar aos combates</a>
+    </header>
+    <main>
+        <h1>{{ encontro.nome }}</h1>
+        <p>{% if encontro.ativo %}Cena ativa · Rodada {{ encontro.rodada }}{% else %}Cena encerrada{% endif %}</p>
+        {% if encontro.ativo %}
+            <section aria-labelledby="combat-controls-heading">
+                <h2 id="combat-controls-heading">Controles da rodada</h2>
+                <p>A ordem permanece fixa. Faça e resolva fisicamente eventuais desempates antes de registrar os resultados. Personagens surpreendidos não agem na primeira rodada.</p>
+                <form method="post" action="{% url 'fichas:avancar_turno_combate' encontro.pk %}">
+                    {% csrf_token %}
+                    <button class="button" type="submit">Iniciar / avançar para o próximo turno</button>
+                </form>
+                <form method="post" action="{% url 'fichas:encerrar_encontro_combate' encontro.pk %}">
+                    {% csrf_token %}
+                    <button class="button button-secondary" type="submit">Encerrar cena</button>
+                </form>
+            </section>
+            {% if encontro.indice_turno < 0 %}
+                <section aria-labelledby="add-participant-heading">
+                    <h2 id="add-participant-heading">Adicionar participante</h2>
+                    <p>Role Iniciativa fisicamente e informe o total. Também é possível incluir uma ameaça sem ficha cadastrada.</p>
+                    <form method="post" action="{% url 'fichas:adicionar_participante_combate' encontro.pk %}">
+                        {% csrf_token %}
+                        {{ form_participante.as_p }}
+                        <button class="button" type="submit">Adicionar à iniciativa</button>
+                    </form>
+                </section>
+            {% endif %}
+        {% endif %}
+        <section aria-labelledby="combat-order-heading">
+            <h2 id="combat-order-heading">Ordem de Iniciativa</h2>
+            <ol>
+                {% for participante in participantes %}
+                    <li{% if participante == atual %} aria-current="step"{% endif %}>
+                        <strong>{{ participante.nome }}</strong> · Iniciativa {{ participante.iniciativa }}
+                        {% if participante.surpreendido and encontro.rodada == 1 %} · Surpreendido (não age nesta rodada){% endif %}
+                        {% if participante.ameaca %}
+                            <p>{{ participante.ameaca.get_categoria_display }} · Defesa {{ participante.ameaca.defesa|default_if_none:'—' }} · PV {{ participante.ameaca.pv|default_if_none:'—' }}</p>
+                            <p>Deslocamento: {{ participante.ameaca.deslocamento|default:'—' }}</p>
+                            <p>Resistências: {{ participante.ameaca.resistencias|default:'—' }} · Vulnerabilidades: {{ participante.ameaca.vulnerabilidades|default:'—' }} · Imunidades: {{ participante.ameaca.imunidades|default:'—' }}</p>
+                            <p>{{ participante.ameaca.acoes|linebreaksbr }}</p>
+                            <p>Anotações: {{ participante.ameaca.anotacoes_mestre|linebreaksbr }}</p>
+                        {% endif %}
+                        {% if participante.ficha_id %}
+                            · PV {{ participante.ficha.pv_atual }}
+                            {% with morrendo=participante.ficha.condicoes.all %}
+                                {% for ficha_condicao in morrendo %}
+                                    {% if ficha_condicao.condicao.slug == 'morrendo' %}
+                                        · Morrendo: {{ ficha_condicao.turnos_morrendo }}/3 turnos iniciados
+                                    {% endif %}
+                                {% endfor %}
+                            {% endwith %}
+                        {% endif %}
+                        {% if participante == atual and encontro.ativo %}
+                            <p>Ação padrão: {% if participante.acao_padrao_usada or participante.acao_completa_usada %}usada{% else %}disponível{% endif %} ·
+                                Ações de movimento: {{ participante.acoes_movimento_usadas }}/2 ·
+                                Ação completa: {% if participante.acao_completa_usada %}usada{% else %}disponível se ações livres{% endif %} ·
+                                Reação defensiva: {% if participante.reacao_defensiva_usada %}usada nesta rodada{% else %}disponível{% endif %}</p>
+                            {% if participante.ficha_id %}
+                                {% if modo_recursos == 'padrao' and participante.limite_pe_turno %}
+                                    <p>PE gastos neste turno: {{ participante.pe_gasto_turno }}/{{ participante.limite_pe_turno }}</p>
+                                    <form method="post" action="{% url 'fichas:gastar_recurso_combate' encontro.pk participante.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="recurso" value="pe">
+                                        <label for="spend-pe-{{ participante.pk }}">Gastar PE</label>
+                                        <input id="spend-pe-{{ participante.pk }}" type="number" name="quantidade" min="1" max="{{ participante.limite_pe_turno }}" required>
+                                        <button class="button button-secondary" type="submit">Registrar gasto de PE</button>
+                                    </form>
+                                {% elif modo_recursos == 'sem_sanidade' and participante.limite_pd_turno %}
+                                    <p>PD gastos neste turno: {{ participante.pd_gasto_turno }}/{{ participante.limite_pd_turno }}</p>
+                                    <form method="post" action="{% url 'fichas:gastar_recurso_combate' encontro.pk participante.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="recurso" value="pd">
+                                        <label for="spend-pd-{{ participante.pk }}">Gastar PD</label>
+                                        <input id="spend-pd-{{ participante.pk }}" type="number" name="quantidade" min="1" max="{{ participante.limite_pd_turno }}" required>
+                                        <button class="button button-secondary" type="submit">Registrar gasto de PD</button>
+                                    </form>
+                                {% endif %}
+                            {% endif %}
+                            <form method="post" action="{% url 'fichas:registrar_acao_combate' encontro.pk participante.pk %}">
+                                {% csrf_token %}
+                                <label for="action-{{ participante.pk }}">Registrar ação/reação declarada</label>
+                                <select id="action-{{ participante.pk }}" name="acao">
+                                    <option value="padrao">Ação padrão</option>
+                                    <option value="movimento">Ação de movimento</option>
+                                    <option value="completa">Ação completa</option>
+                                    <option value="reacao_defensiva">Reação defensiva (bloqueio, contra-ataque ou esquiva)</option>
+                                </select>
+                                <button class="button button-secondary" type="submit">Registrar</button>
+                            </form>
+                        {% endif %}
+                        {% if participante.ficha_id and encontro.ativo %}
+                            <form method="post" action="{% url 'fichas:aplicar_dano_combate' encontro.pk participante.pk %}">
+                                {% csrf_token %}
+                                <label for="damage-{{ participante.pk }}">{{ form_dano.dano.label }}</label>
+                                <input id="damage-{{ participante.pk }}" type="number" name="dano" min="1" max="1000" required>
+                                <button class="button button-secondary" type="submit">Aplicar dano físico</button>
+                            </form>
+                        {% endif %}
+                        {% if participante.ficha_id and participante.ficha.pv_atual == 0 and encontro.ativo %}
+                            <form method="post" action="{% url 'fichas:estabilizar_combate' encontro.pk participante.pk %}">
+                                {% csrf_token %}
+                                <label for="stabilize-{{ participante.pk }}">
+                                    <input id="stabilize-{{ participante.pk }}" type="checkbox" name="confirmar">
+                                    Confirme sucesso físico em Medicina DT 20
+                                </label>
+                                <button class="button button-secondary" type="submit">Registrar estabilização</button>
+                            </form>
+                        {% endif %}
+                    </li>
+                {% empty %}
+                    <li>Nenhum participante adicionado.</li>
+                {% endfor %}
+            </ol>
+        </section>
+    </main>
+</div>
+{% endblock %}

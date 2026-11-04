@@ -7,12 +7,13 @@
     <header class="topbar">
         <a href="{% url 'home' %}">Fichas</a>
         <nav aria-label="Ações da ficha">
-            <a class="button" href="{% url 'fichas:editar' ficha.pk %}">Editar</a>
+            {% if pode_editar %}<a class="button" href="{% url 'fichas:editar' ficha.pk %}">Editar</a>{% endif %}
         </nav>
     </header>
     <main>
         <h1>{{ ficha.nome }}</h1>
         <p>{{ ficha.conceito }}</p>
+        {% if not pode_editar %}<p role="status">Ficha somente leitura para o jogador.</p>{% endif %}
         <nav class="tabs" aria-label="Seções da ficha">
             <a href="#status">Status</a>
             <a href="#pericias">Perícias</a>
@@ -21,15 +22,33 @@
         <section id="status">
             <h2>Status</h2>
             <p>{{ ficha.classe|default:'Sem classe' }} · {{ ficha.get_status_display }}</p>
-            {% if ficha.nex %}<p>NEX {{ ficha.nex }}%</p>{% endif %}
-            {% if pode_editar and ficha.status == 'ativa' %}
+            {% if ficha.nex is not None %}<p>NEX {{ ficha.nex }}%</p>{% endif %}
+            {% if ficha.nivel_experiencia is not None %}<p>Nível de experiência {{ ficha.nivel_experiencia }}</p>{% endif %}
+            {% if ficha.patente_id %}
+                <p>Patente: {{ ficha.patente.nome }} · Prestígio: {{ ficha.pontos_prestigio }}</p>
+                <p>Limite de PD: {{ ficha.patente.limite_pd }} por turno · Nível equivalente: {{ ficha.patente.limite_pd }} · Recuperação: {{ ficha.patente.recuperacao }} PV ou PD</p>
+                <p>Crédito: {{ ficha.patente.credito }} · Limites de categoria:
+                    {% for categoria, limite in ficha.patente.limites_categoria.items %}
+                        {{ categoria }}: {{ limite }}{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                </p>
+            {% endif %}
+            {% if pode_recuperar_patente %}
+                <form method="post" action="{% url 'fichas:recuperar_patente' ficha.pk %}">
+                    {% csrf_token %}
+                    {{ formulario_recuperacao_patente.as_p }}
+                    <button class="button button-secondary" type="submit">Dormir / relaxar e recuperar</button>
+                </form>
+            {% endif %}
+            {% if ficha.estagio %}<p>Estágio {{ ficha.estagio }}</p>{% endif %}
+            {% if pode_alterar_status and ficha.status == 'ativa' %}
                 <form method="post" action="{% url 'fichas:status' ficha.pk %}">
                     {% csrf_token %}
                     <input type="hidden" name="status" value="arquivada">
                     <input type="hidden" name="versao" value="{{ ficha.versao }}">
                     <button class="button button-secondary" type="submit">Arquivar ficha</button>
                 </form>
-            {% elif pode_editar and ficha.status == 'arquivada' %}
+            {% elif pode_alterar_status and ficha.status == 'arquivada' %}
                 <form method="post" action="{% url 'fichas:status' ficha.pk %}">
                     {% csrf_token %}
                     <input type="hidden" name="status" value="ativa">
@@ -37,32 +56,98 @@
                     <button class="button button-secondary" type="submit">Restaurar ficha</button>
                 </form>
             {% endif %}
-            <form hidden>{% csrf_token %}</form>
-            <div class="resource-grid" aria-label="Recursos">
+            <section class="session-controls" aria-label="Modo sessão">
+                <h2>Modo sessão</h2>
+                <label><input type="checkbox" data-session-mode-toggle> Alto contraste e texto ampliado nesta tela</label>
+                <label><input type="checkbox" data-wake-lock-toggle> Manter a tela acesa durante a sessão</label>
+                <p data-session-feedback role="status" aria-live="polite"></p>
+            </section>
+            <div class="resource-grid" aria-label="Recursos" data-resource-mode="{{ modo_recursos }}">
                 <section class="resource" data-resource-panel="pv">
                     <h3>PV</h3><p><output data-current="pv">{{ ficha.pv_atual }}</output> / <span data-max="pv">{{ maximos.pv }}</span></p>
-                    <button class="button button-secondary" type="button" data-resource="pv" data-delta="-1" aria-label="Diminuir PV">-</button>
-                    <button class="button" type="button" data-resource="pv" data-delta="1" aria-label="Aumentar PV">+</button>
+                    {% if pode_editar %}
+                        <div class="resource-adjust-buttons">
+                            <button class="button button-secondary" type="button" data-resource="pv" data-delta="-5" aria-label="Diminuir 5 PV">−5</button>
+                            <button class="button button-secondary" type="button" data-resource="pv" data-delta="-1" aria-label="Diminuir 1 PV">−1</button>
+                            <button class="button" type="button" data-resource="pv" data-delta="1" aria-label="Aumentar 1 PV">+1</button>
+                            <button class="button" type="button" data-resource="pv" data-delta="5" aria-label="Aumentar 5 PV">+5</button>
+                        </div>
+                        <form class="resource-adjustment" method="post" data-resource-adjustment="pv">
+                            {% csrf_token %}
+                            <label>Ajustar PV <input name="delta" type="number" min="-1000" max="1000" step="1" required></label>
+                            <button class="button button-secondary" type="submit">Aplicar</button>
+                        </form>
+                    {% endif %}
                 </section>
                 {% if modo_recursos == 'padrao' %}
                 <section class="resource" data-resource-panel="pe">
                     <h3>PE</h3><p><output data-current="pe">{{ ficha.pe_atual }}</output> / <span data-max="pe">{{ maximos.pe }}</span></p>
-                    <button class="button button-secondary" type="button" data-resource="pe" data-delta="-1" aria-label="Diminuir PE">-</button>
-                    <button class="button" type="button" data-resource="pe" data-delta="1" aria-label="Aumentar PE">+</button>
+                    {% if pode_editar %}
+                        <div class="resource-adjust-buttons">
+                            <button class="button button-secondary" type="button" data-resource="pe" data-delta="-5" aria-label="Diminuir 5 PE">−5</button>
+                            <button class="button button-secondary" type="button" data-resource="pe" data-delta="-1" aria-label="Diminuir 1 PE">−1</button>
+                            <button class="button" type="button" data-resource="pe" data-delta="1" aria-label="Aumentar 1 PE">+1</button>
+                            <button class="button" type="button" data-resource="pe" data-delta="5" aria-label="Aumentar 5 PE">+5</button>
+                        </div>
+                        <form class="resource-adjustment" method="post" data-resource-adjustment="pe">
+                            {% csrf_token %}
+                            <label>Ajustar PE <input name="delta" type="number" min="-1000" max="1000" step="1" required></label>
+                            <button class="button button-secondary" type="submit">Aplicar</button>
+                        </form>
+                    {% endif %}
                 </section>
                 <section class="resource" data-resource-panel="san">
                     <h3>SAN</h3><p><output data-current="san">{{ ficha.san_atual }}</output> / <span data-max="san">{{ maximos.san }}</span></p>
-                    <button class="button button-secondary" type="button" data-resource="san" data-delta="-1" aria-label="Diminuir SAN">-</button>
-                    <button class="button" type="button" data-resource="san" data-delta="1" aria-label="Aumentar SAN">+</button>
+                    {% if pode_editar %}
+                        <div class="resource-adjust-buttons">
+                            <button class="button button-secondary" type="button" data-resource="san" data-delta="-5" aria-label="Diminuir 5 SAN">−5</button>
+                            <button class="button button-secondary" type="button" data-resource="san" data-delta="-1" aria-label="Diminuir 1 SAN">−1</button>
+                            <button class="button" type="button" data-resource="san" data-delta="1" aria-label="Aumentar 1 SAN">+1</button>
+                            <button class="button" type="button" data-resource="san" data-delta="5" aria-label="Aumentar 5 SAN">+5</button>
+                        </div>
+                        <form class="resource-adjustment" method="post" data-resource-adjustment="san">
+                            {% csrf_token %}
+                            <label>Ajustar SAN <input name="delta" type="number" min="-1000" max="1000" step="1" required></label>
+                            <button class="button button-secondary" type="submit">Aplicar</button>
+                        </form>
+                    {% endif %}
                 </section>
                 {% else %}
                 <section class="resource" data-resource-panel="pd">
                     <h3>PD</h3><p><output data-current="pd">{{ ficha.pd_atual }}</output> / <span data-max="pd">{{ maximos.pd }}</span></p>
-                    <button class="button button-secondary" type="button" data-resource="pd" data-delta="-1" aria-label="Diminuir PD">-</button>
-                    <button class="button" type="button" data-resource="pd" data-delta="1" aria-label="Aumentar PD">+</button>
+                    {% if pode_editar %}
+                        <div class="resource-adjust-buttons">
+                            <button class="button button-secondary" type="button" data-resource="pd" data-delta="-5" aria-label="Diminuir 5 PD">−5</button>
+                            <button class="button button-secondary" type="button" data-resource="pd" data-delta="-1" aria-label="Diminuir 1 PD">−1</button>
+                            <button class="button" type="button" data-resource="pd" data-delta="1" aria-label="Aumentar 1 PD">+1</button>
+                            <button class="button" type="button" data-resource="pd" data-delta="5" aria-label="Aumentar 5 PD">+5</button>
+                        </div>
+                        <form class="resource-adjustment" method="post" data-resource-adjustment="pd">
+                            {% csrf_token %}
+                            <label>Ajustar PD <input name="delta" type="number" min="-1000" max="1000" step="1" required></label>
+                            <button class="button button-secondary" type="submit">Aplicar</button>
+                        </form>
+                    {% endif %}
                 </section>
                 {% endif %}
             </div>
+            <section class="resource resource-temporary" data-resource-panel="pv_temporario">
+                <h3>PV temporários</h3>
+                <p><output data-current="pv_temporario">{{ ficha.pv_temporario }}</output> · Absorvem dano antes dos PV.</p>
+                {% if pode_editar %}
+                    <div class="resource-adjust-buttons">
+                        <button class="button button-secondary" type="button" data-resource="pv_temporario" data-delta="-5" aria-label="Diminuir 5 PV temporários">−5</button>
+                        <button class="button button-secondary" type="button" data-resource="pv_temporario" data-delta="-1" aria-label="Diminuir 1 PV temporário">−1</button>
+                        <button class="button" type="button" data-resource="pv_temporario" data-delta="1" aria-label="Aumentar 1 PV temporário">+1</button>
+                        <button class="button" type="button" data-resource="pv_temporario" data-delta="5" aria-label="Aumentar 5 PV temporários">+5</button>
+                    </div>
+                    <form class="resource-adjustment" method="post" data-resource-adjustment="pv_temporario">
+                        {% csrf_token %}
+                        <label>Ajustar PV temporários <input name="delta" type="number" min="-1000" max="1000" step="1" required></label>
+                        <button class="button button-secondary" type="submit">Aplicar</button>
+                    </form>
+                {% endif %}
+            </section>
             <p class="feedback" data-feedback role="status" aria-live="polite"></p>
             <h3>Atributos</h3>
             <dl class="stat-list">
@@ -71,6 +156,7 @@
                 <dt>Intelecto</dt><dd>{{ ficha.intelecto }}</dd>
                 <dt>Presença</dt><dd>{{ ficha.presenca }}</dd>
                 <dt>Vigor</dt><dd>{{ ficha.vigor }}</dd>
+                <dt>Defesa</dt><dd><output data-defense>{{ defesa }}</output></dd>
             </dl>
         </section>
         {% if pendencias %}
@@ -78,7 +164,12 @@
                 <h2 id="pending-heading">Escolhas pendentes</h2>
                 <ul>
                     {% for pendencia in pendencias %}
-                        <li>{{ pendencia.descricao }} <span class="muted">{{ pendencia.fonte }}</span></li>
+                        <li>
+                            {{ pendencia.descricao }} <span class="muted">{{ pendencia.fonte }}</span>
+                            {% if pode_editar %}
+                                <a class="button button-secondary" href="{% url 'fichas:resolver_pendencia' ficha.pk pendencia.pk %}">Resolver escolha</a>
+                            {% endif %}
+                        </li>
                     {% endfor %}
                 </ul>
             </section>
@@ -135,6 +226,90 @@
                 </form>
             </section>
         {% endif %}
+        {% if pode_avancar_nivel %}
+            <section aria-labelledby="experience-heading">
+                <h2 id="experience-heading">Avanço de experiência</h2>
+                <p>O nível acompanha a progressão de classe; o NEX registra apenas a exposição paranormal.</p>
+                <form method="post" action="{% url 'fichas:avancar_nivel' ficha.pk %}">
+                    {% csrf_token %}
+                    {{ formulario_nivel.as_p }}
+                    <button class="button" type="submit">Avançar nível</button>
+                </form>
+            </section>
+        {% endif %}
+        {% if pode_registrar_exposicao %}
+            <section aria-labelledby="exposure-heading">
+                <h2 id="exposure-heading">Exposição paranormal</h2>
+                <form method="post" action="{% url 'fichas:registrar_exposicao' ficha.pk %}">
+                    {% csrf_token %}
+                    {{ formulario_exposicao.as_p }}
+                    <button class="button button-secondary" type="submit">Registrar exposição</button>
+                </form>
+            </section>
+        {% endif %}
+        {% if pode_registrar_prestigio %}
+            <section aria-labelledby="prestige-heading">
+                <h2 id="prestige-heading">Evolução por patentes</h2>
+                <p>Sessão {{ numero_sessao }} · Patente atual: {{ ficha.patente.nome }} · Prestígio: {{ ficha.pontos_prestigio }}</p>
+                <form method="post" action="{% url 'fichas:registrar_prestigio' ficha.pk %}">
+                    {% csrf_token %}
+                    {{ formulario_prestigio.as_p }}
+                    <button class="button button-secondary" type="submit">Registrar evento da missão</button>
+                </form>
+            </section>
+        {% endif %}
+        {% if registros_prestigio %}
+            <section aria-labelledby="prestige-history-heading">
+                <h2 id="prestige-history-heading">Histórico de prestígio</h2>
+                <ul>
+                    {% for registro in registros_prestigio %}
+                        <li>Sessão {{ registro.numero_sessao }} · {{ registro.get_evento_display }} · ×{{ registro.quantidade }} · {{ registro.delta }} pontos</li>
+                    {% endfor %}
+                </ul>
+            </section>
+        {% endif %}
+        {% if habilidades_estagio %}
+            <section aria-labelledby="survivor-abilities-heading">
+                <h2 id="survivor-abilities-heading">Sobrevivente neste estágio</h2>
+                <ul>
+                    {% for habilidade in habilidades_estagio %}
+                        <li>{{ habilidade }}</li>
+                    {% endfor %}
+                </ul>
+                <p>Consulte as escolhas pendentes para registrar habilidades e aumentos.</p>
+            </section>
+        {% endif %}
+        {% if ficha.estagio == 5 and ficha.classe.slug == 'sobrevivente' %}
+            <section aria-labelledby="scarred-heading">
+                <h2 id="scarred-heading">Cicatrizado</h2>
+                {% if ficha.cicatrizado_perigo %}
+                    <p>Perigo marcado: {{ ficha.cicatrizado_perigo }} · Elemento: {{ ficha.get_cicatrizado_elemento_display }}</p>
+                    <p>Você sofre −1 dado em testes de resistência contra esse perigo.</p>
+                    {% if cicatrizado_disponivel and pode_editar %}
+                        <form method="post" action="{% url 'fichas:usar_cicatrizado' ficha.pk %}">
+                            {% csrf_token %}
+                            {{ formulario_cicatrizado.as_p }}
+                            <button class="button" type="submit">Usar reação de Cicatrizado</button>
+                        </form>
+                        <p class="muted">Uso da sessão {{ numero_sessao }}. O sacrifício reduz permanentemente o máximo de PV ou PE/PD.</p>
+                    {% else %}
+                        <p role="status">Reação já usada nesta sessão ou ficha somente leitura.</p>
+                    {% endif %}
+                {% else %}
+                    <p>Ainda falta escolher e registrar o perigo paranormal enfrentado.</p>
+                {% endif %}
+            </section>
+        {% endif %}
+        {% if pode_avancar_estagio %}
+            <section aria-labelledby="survivor-progression-heading">
+                <h2 id="survivor-progression-heading">Avanço de estágio</h2>
+                <form method="post" action="{% url 'fichas:avancar_estagio' ficha.pk %}">
+                    {% csrf_token %}
+                    {{ formulario_estagio.as_p }}
+                    <button class="button" type="submit">Avançar estágio</button>
+                </form>
+            </section>
+        {% endif %}
         <section id="pericias">
             <h2>Perícias</h2>
             <ul>
@@ -145,28 +320,99 @@
                 {% endfor %}
             </ul>
         </section>
+        <section id="proficiencias">
+            <h2>Trilha, poderes e rituais</h2>
+            {% if ficha.trilha or ficha.trilha_nome_personalizado %}
+                <p>
+                    <strong>Trilha:</strong>
+                    {% if ficha.trilha %}{{ ficha.trilha.nome }} <span class="muted">{{ ficha.trilha.fonte }}</span>
+                    {% else %}{{ ficha.trilha_nome_personalizado }} <span class="muted">{{ ficha.trilha_fonte_personalizada }}</span>
+                        <br>{{ ficha.trilha_resumo_personalizado }}
+                    {% endif %}
+                </p>
+            {% endif %}
+            <h3>Poderes</h3>
+            <ul>
+                {% for ficha_poder in ficha_poderes %}
+                    <li>
+                        <strong>{% if ficha_poder.poder %}{{ ficha_poder.poder.nome }}{% else %}{{ ficha_poder.nome_personalizado }}{% endif %}</strong>
+                        <span class="muted">{{ ficha_poder.fonte }}</span>
+                        {% if ficha_poder.resumo_personalizado %}<p>{{ ficha_poder.resumo_personalizado }}</p>
+                        {% elif ficha_poder.poder %}<p>{{ ficha_poder.poder.resumo }}</p>{% endif %}
+                    </li>
+                {% empty %}<li>Nenhum poder registrado.</li>{% endfor %}
+            </ul>
+            <h3>Rituais</h3>
+            <ul>
+                {% for ficha_ritual in ficha_rituais %}
+                    <li>
+                        <strong>{% if ficha_ritual.ritual %}{{ ficha_ritual.ritual.nome }}{% else %}{{ ficha_ritual.nome_personalizado }}{% endif %}</strong>
+                        <span class="muted">{{ ficha_ritual.fonte }}</span>
+                        {% if ficha_ritual.resumo_personalizado %}<p>{{ ficha_ritual.resumo_personalizado }}</p>
+                        {% elif ficha_ritual.ritual %}<p>{{ ficha_ritual.ritual.resumo }}</p>{% endif %}
+                    </li>
+                {% empty %}<li>Nenhum ritual registrado.</li>{% endfor %}
+            </ul>
+        </section>
         <section id="condicoes">
             <h2>Condições</h2>
-            <ul data-condition-list>
+            <ul data-condition-list data-can-edit="{{ pode_editar|yesno:'true,false' }}">
                 {% for ficha_condicao in condicoes_ativas %}
                     <li data-active-condition="{{ ficha_condicao.condicao_id }}">
-                        {{ ficha_condicao.condicao.nome }}
-                        <button class="button button-secondary" type="button" data-condition-remove="{{ ficha_condicao.condicao_id }}">Remover</button>
+                        <strong>{{ ficha_condicao.condicao.nome }}</strong>
+                        <span class="muted">{{ ficha_condicao.condicao.resumo }}</span>
+                        {% if pode_editar and ficha_condicao.condicao.proxima_escalada %}
+                            <button class="button button-secondary" type="button"
+                                data-condition-escalate="{{ ficha_condicao.condicao_id }}">
+                                Escalar para {{ ficha_condicao.condicao.proxima_escalada.nome }}
+                            </button>
+                        {% endif %}
+                        {% if pode_editar %}<button class="button button-secondary" type="button" data-condition-remove="{{ ficha_condicao.condicao_id }}">Remover</button>{% endif %}
                     </li>
                 {% empty %}
                     <li data-empty-conditions>Nenhuma condição ativa.</li>
                 {% endfor %}
             </ul>
-            <div class="condition-add">
-                <label for="condition-select">Adicionar condição</label>
-                <select id="condition-select">
-                    {% for condicao in condicoes_disponiveis %}<option value="{{ condicao.pk }}">{{ condicao.nome }}</option>{% endfor %}
-                </select>
-                <button class="button" type="button" data-condition-add>Adicionar</button>
-            </div>
+            {% if pode_editar %}
+                <div class="condition-add">
+                    <label for="condition-select">Adicionar condição</label>
+                    <select id="condition-select">
+                        {% for condicao in condicoes_disponiveis %}<option value="{{ condicao.pk }}">{{ condicao.nome }}</option>{% endfor %}
+                    </select>
+                    <button class="button" type="button" data-condition-add>Adicionar</button>
+                </div>
+            {% endif %}
         </section>
+        {% if modo_ferimentos_debilitantes %}
+            <section id="ferimentos" aria-labelledby="wounds-heading">
+                <h2 id="wounds-heading">Ferimentos debilitantes</h2>
+                <p>Cada ferimento impõe −1 dado a testes baseados no atributo afetado. Ferimentos em Vigor também reduzem PV máximos conforme a progressão.</p>
+                <ul>
+                    {% for ferimento in ferimentos_debilitantes %}
+                        <li>
+                            {{ ferimento.get_atributo_display }}
+                            {% if ferimento.tratamento_aprovado_em %}
+                                · Medicina aprovada; falta dormir para recuperar.
+                            {% else %}
+                                · Tratamento: Medicina DT 20.
+                            {% endif %}
+                        </li>
+                    {% empty %}
+                        <li>Nenhum ferimento debilitante ativo.</li>
+                    {% endfor %}
+                </ul>
+                {% if mestre and formulario_ferimento %}
+                    <form method="post" action="{% url 'fichas:gerenciar_ferimento' ficha.pk %}">
+                        {% csrf_token %}
+                        {{ formulario_ferimento.as_p }}
+                        <button class="button button-secondary" type="submit">Registrar atualização</button>
+                    </form>
+                {% endif %}
+            </section>
+        {% endif %}
+        {% if pode_editar %}
         <section class="roll-panel" aria-labelledby="roll-heading">
-            <h2 id="roll-heading">Rolar teste</h2>
+            <h2 id="roll-heading">Teste</h2>
             <form data-roll-form>
                 <label for="roll-type">Tipo</label>
                 <select id="roll-type" name="tipo">
@@ -176,16 +422,85 @@
                 </select>
                 <label for="roll-target">Alvo</label>
                 <select id="roll-target" name="alvo">
-                    {% for atributo in atributos %}<option value="{{ atributo }}" data-roll-for="atributo">{{ atributo|capfirst }}</option>{% endfor %}
-                    {% for ficha_pericia in ficha_pericias %}<option value="{{ ficha_pericia.pericia_id }}" data-roll-for="pericia">{{ ficha_pericia.pericia.nome }}</option>{% endfor %}
+                    {% for alvo in alvos_rolagem %}
+                        <option value="{{ alvo.id }}" data-roll-for="{{ alvo.tipo }}"
+                            data-roll-slug="{{ alvo.pericia_slug|default:'' }}"
+                            data-wound-dice="{{ alvo.dados_ferimentos }}"
+                            data-attribute-value="{{ alvo.atributo_valor }}"
+                            data-training-bonus="{{ alvo.bonus_treinamento }}"
+                            data-training-required="{{ alvo.treinamento_obrigatorio|yesno:'true,false' }}"
+                            data-trained="{{ alvo.treinado|yesno:'true,false' }}"
+                            data-condition-dice="{{ alvo.dados_condicao }}"
+                            data-load-penalty="{{ alvo.penalidade_carga|default:0 }}"
+                            data-kit-required="{{ alvo.exige_kit|yesno:'true,false' }}"
+                            data-attribute-name="{{ alvo.atributo_nome|default:alvo.nome }}"
+                            {% if alvo.treinamento_obrigatorio and not alvo.treinado %}disabled{% endif %}>
+                            {{ alvo.nome }}{% if alvo.treinamento_obrigatorio and not alvo.treinado %} (exige treinamento){% endif %}
+                        </option>
+                    {% endfor %}
                     {% for numero in "1234567890" %}<option value="{{ forloop.counter }}" data-roll-for="livre">{{ forloop.counter }} dado(s)</option>{% endfor %}
                 </select>
-                <label for="roll-bonus">Bônus</label>
+                {% if ficha.estagio == 5 and ficha.classe.slug == 'sobrevivente' and ficha.cicatrizado_perigo %}
+                    <label class="cicatrizado-test" data-cicatrizado-field hidden
+                        for="roll-cicatrizado-perigo">
+                        <input id="roll-cicatrizado-perigo" type="checkbox"
+                            data-cicatrizado-danger="{{ ficha.cicatrizado_perigo }}">
+                        Teste de resistência contra {{ ficha.cicatrizado_perigo }} (−1 dado)
+                    </label>
+                {% endif %}
+                <label for="roll-bonus">Bônus/penalidade numérica adicional</label>
                 <input id="roll-bonus" name="bonus" type="number" min="-100" max="100" value="0">
-                <button class="button" type="submit">Rolar</button>
+                <label for="roll-extra-dice">Dados extras ou penalidade em dados</label>
+                <input id="roll-extra-dice" name="dados_extras" type="number" min="-10" max="10" value="0">
+                <label class="kit-availability" data-kit-field hidden for="roll-kit-available">
+                    <input id="roll-kit-available" name="kit_disponivel" type="checkbox">
+                    Tenho o kit adequado para esta perícia
+                </label>
+                <p class="roll-instructions" data-roll-instructions role="status" aria-live="polite"></p>
+                <div class="roll-physical-fields" data-physical-fields>
+                    <label for="roll-physical-dice">Resultados dos d20 físicos</label>
+                    <input id="roll-physical-dice" name="dados_fisicos" type="text"
+                        inputmode="numeric" maxlength="80" autocomplete="off"
+                        placeholder="Ex.: 7, 14, 19" aria-describedby="roll-input-help">
+                    <label for="roll-dt">DT (opcional)</label>
+                    <input id="roll-dt" name="dt" type="number" min="1" max="1000" inputmode="numeric">
+                    <p id="roll-input-help">Digite um resultado por dado, separados por espaço ou vírgula.</p>
+                </div>
+                <label for="roll-mode">Como avaliar</label>
+                <select id="roll-mode" name="modo">
+                    <option value="fisico">Dados físicos (principal)</option>
+                    <option value="digital">Rolar no site (opcional)</option>
+                </select>
+                <button class="button" type="submit" data-roll-submit>Avaliar dados físicos</button>
             </form>
-            <p data-roll-result role="status" aria-live="polite"></p>
+            <p class="roll-result" data-roll-result role="status" aria-live="polite"></p>
         </section>
+        <section class="roll-panel" aria-labelledby="damage-heading">
+            <h2 id="damage-heading">Dano</h2>
+            <p>Informe os dados da arma ou efeito. Em crítico, multiplique apenas a quantidade de dados; o bônus numérico é somado uma vez.</p>
+            <form data-damage-form>
+                <label for="damage-dice-count">Quantidade de dados</label>
+                <input id="damage-dice-count" name="quantidade_dados" type="number" min="1" max="30" value="1" required>
+                <label for="damage-dice-faces">Faces por dado</label>
+                <input id="damage-dice-faces" name="faces" type="number" min="2" max="100" value="6" required>
+                <label for="damage-bonus">Bônus numérico</label>
+                <input id="damage-bonus" name="bonus" type="number" min="-1000" max="1000" value="0" required>
+                <label for="damage-critical-multiplier">Multiplicador crítico</label>
+                <input id="damage-critical-multiplier" name="multiplicador_critico" type="number" min="1" max="10" value="1" required>
+                <label for="damage-physical-dice">Resultados dos dados físicos</label>
+                <input id="damage-physical-dice" name="dados_fisicos" type="text"
+                    inputmode="numeric" maxlength="300" autocomplete="off"
+                    placeholder="Ex.: 3, 5">
+                <label for="damage-mode">Como avaliar</label>
+                <select id="damage-mode" name="modo">
+                    <option value="fisico">Dados físicos (principal)</option>
+                    <option value="digital">Rolar no site (opcional)</option>
+                </select>
+                <button class="button" type="submit">Avaliar dano</button>
+            </form>
+            <p data-damage-result role="status" aria-live="polite"></p>
+        </section>
+        {% endif %}
         {% if ficha.anotacoes_jogador %}<section><h2>Anotações privadas</h2><p>{{ ficha.anotacoes_jogador }}</p></section>{% endif %}
         {% if mestre and ficha.anotacoes_mestre %}<section><h2>Anotações do mestre</h2><p>{{ ficha.anotacoes_mestre }}</p></section>{% endif %}
     </main>

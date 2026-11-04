@@ -1,10 +1,13 @@
 <!doctype html>
 <html lang="pt-br">
 <head>
+    {% load static %}
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <meta name="theme-color" content="#111111">
+    <link rel="manifest" href="{% static 'manifest.webmanifest' %}">
     <title>{% block title %}MONOTOFOBIA{% endblock %}</title>
-    {% load static %}
     <link rel="stylesheet" href="{% static 'css/style.css' %}">
 </head>
 <body>
@@ -16,6 +19,7 @@
         </div>
     {% endif %}
     {% block content %}{% endblock %}
+        <script src="{% static 'js/pwa.js' %}" defer></script>
         {% block scripts %}{% endblock %}
 </body>
 </html>

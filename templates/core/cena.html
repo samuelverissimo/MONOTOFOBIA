@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}{{ cena.nome }} | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<div class="page form-page">
+    <header class="topbar">
+        <a href="{% url 'lista_cenas' %}">Voltar às cenas</a>
+        {% if mestre %}<a href="{% url 'painel_mestre' %}">Painel do mestre</a>{% endif %}
+    </header>
+    <main>
+        <h1>{{ cena.nome }}</h1>
+        <p>{{ cena.get_tipo_display }}{% if mestre %} · {% if cena.ativa %}Visível aos jogadores{% else %}Oculta{% endif %}{% endif %}</p>
+        {% if cena.descricao_jogadores %}
+            <section aria-labelledby="scene-description-heading">
+                <h2 id="scene-description-heading">Descrição</h2>
+                <p>{{ cena.descricao_jogadores|linebreaksbr }}</p>
+            </section>
+        {% endif %}
+        {% if mestre %}
+            {% if cena.anotacoes_mestre %}
+                <section aria-labelledby="master-notes-heading">
+                    <h2 id="master-notes-heading">Anotações do mestre</h2>
+                    <p>{{ cena.anotacoes_mestre|linebreaksbr }}</p>
+                </section>
+            {% endif %}
+            <form method="post" action="{% url 'alterar_estado_cena' cena.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="ativa" value="{% if cena.ativa %}0{% else %}1{% endif %}">
+                <button class="button" type="submit">{% if cena.ativa %}Ocultar dos jogadores{% else %}Mostrar aos jogadores{% endif %}</button>
+            </form>
+            <section aria-labelledby="add-clue-heading">
+                <h2 id="add-clue-heading">Adicionar pista</h2>
+                <form method="post" action="{% url 'adicionar_pista' cena.pk %}">
+                    {% csrf_token %}
+                    {{ formulario_pista.as_p }}
+                    <button class="button" type="submit">Guardar pista oculta</button>
+                </form>
+            </section>
+        {% endif %}
+        <section aria-labelledby="clues-heading">
+            <h2 id="clues-heading">Pistas</h2>
+            <ul class="sheet-list">
+                {% for pista in pistas %}
+                    <li>
+                        <strong>{{ pista.titulo }}</strong>
+                        <p>{{ pista.conteudo|linebreaksbr }}</p>
+                        <span>{{ pista.get_estado_display }}</span>
+                        {% if mestre %}
+                            <form method="post" action="{% url 'alterar_estado_pista' cena.pk pista.pk %}">
+                                {% csrf_token %}
+                                <label for="clue-state-{{ pista.pk }}">Estado</label>
+                                <select id="clue-state-{{ pista.pk }}" name="estado">
+                                    {% for value, label in estados_pista %}
+                                        <option value="{{ value }}"{% if pista.estado == value %} selected{% endif %}>{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button class="button" type="submit">Atualizar pista</button>
+                            </form>
+                        {% endif %}
+                    </li>
+                {% empty %}
+                    <li>Nenhuma pista revelada.</li>
+                {% endfor %}
+            </ul>
+        </section>
+    </main>
+</div>
+{% endblock %}

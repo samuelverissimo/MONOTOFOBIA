@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Combates | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<div class="page">
+    <header class="topbar">
+        <a href="{% url 'painel_mestre' %}">Voltar ao painel do mestre</a>
+    </header>
+    <main>
+        <h1>Combates</h1>
+        <p>Controle presencial de iniciativa e turnos. Esta tela é exclusiva do mestre; role os dados na mesa e registre os resultados.</p>
+        <section aria-labelledby="create-combat-heading">
+            <h2 id="create-combat-heading">Nova cena</h2>
+            <form method="post">
+                {% csrf_token %}
+                {{ form.as_p }}
+                <button class="button" type="submit">Criar cena</button>
+            </form>
+        </section>
+        <section aria-labelledby="combat-list-heading">
+            <h2 id="combat-list-heading">Cenas registradas</h2>
+            <ul class="sheet-list">
+                {% for encontro in encontros %}
+                    <li>
+                        <a href="{% url 'fichas:encontro_combate' encontro.pk %}">{{ encontro.nome }}</a>
+                        <span>{% if encontro.ativo %}Ativa · Rodada {{ encontro.rodada }}{% else %}Encerrada{% endif %} · {{ encontro.participantes.count }} participante(s)</span>
+                    </li>
+                {% empty %}
+                    <li>Nenhuma cena cadastrada.</li>
+                {% endfor %}
+            </ul>
+        </section>
+    </main>
+</div>
+{% endblock %}

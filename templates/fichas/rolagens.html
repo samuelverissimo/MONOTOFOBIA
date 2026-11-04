@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Histórico de rolagens | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<div class="page">
+    <header class="topbar">
+        <a href="{% url 'home' %}">Voltar às fichas</a>
+        {% if mestre %}<a href="{% url 'painel_mestre' %}">Painel do mestre</a>{% endif %}
+    </header>
+    <main>
+        <h1>Histórico de rolagens</h1>
+        <form class="roll-history-filter" method="get">
+            <label for="roll-sheet-filter">Ficha</label>
+            <select id="roll-sheet-filter" name="ficha">
+                <option value="">Todas as fichas visíveis</option>
+                {% for ficha in fichas %}
+                    <option value="{{ ficha.pk }}"{% if ficha_selecionada.pk == ficha.pk %} selected{% endif %}>
+                        {{ ficha.nome }}
+                    </option>
+                {% endfor %}
+            </select>
+            <button class="button button-secondary" type="submit">Filtrar</button>
+        </form>
+        <ol class="master-roll-list">
+            {% for rolagem in rolagens %}
+                <li>
+                    <strong>{{ rolagem.ficha.nome }} · {{ rolagem.descricao }}</strong>
+                    <span>Dados [{{ rolagem.dados|join:', ' }}] · escolha {{ rolagem.dado_escolhido }} · bônus {{ rolagem.bonus }} · total {{ rolagem.total }}</span>
+                    <span class="muted">{{ rolagem.usuario.username }} · {{ rolagem.criada_em|date:'d/m/Y H:i' }}{% if rolagem.secreta %} · Secreta{% endif %}</span>
+                </li>
+            {% empty %}
+                <li>Nenhuma rolagem visível registrada.</li>
+            {% endfor %}
+        </ol>
+        {% if rolagens.has_other_pages %}
+            <nav aria-label="Paginação do histórico" class="pagination">
+                {% if rolagens.has_previous %}
+                    <a href="?{% if ficha_selecionada %}ficha={{ ficha_selecionada.pk }}&amp;{% endif %}pagina={{ rolagens.previous_page_number }}">Anterior</a>
+                {% endif %}
+                <span>Página {{ rolagens.number }} de {{ rolagens.paginator.num_pages }}</span>
+                {% if rolagens.has_next %}
+                    <a href="?{% if ficha_selecionada %}ficha={{ ficha_selecionada.pk }}&amp;{% endif %}pagina={{ rolagens.next_page_number }}">Próxima</a>
+                {% endif %}
+            </nav>
+        {% endif %}
+    </main>
+</div>
+{% endblock %}

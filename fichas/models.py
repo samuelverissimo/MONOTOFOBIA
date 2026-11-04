@@ -4,8 +4,19 @@ from django.core.validators import MaxLengthValidator, MaxValueValidator, MinVal
 from django.db import models
 from django.db.models import Q
 
+from .regras import CAMPOS_EFEITOS_CONDICAO
 
 RESUMO_VALIDATORS = [MaxLengthValidator(500)]
+
+
+def validar_efeitos_condicao(efeitos):
+    if not isinstance(efeitos, dict) or any(
+        campo not in CAMPOS_EFEITOS_CONDICAO
+        or type(valor) is not int
+        or abs(valor) > 10
+        for campo, valor in efeitos.items()
+    ):
+        raise ValidationError('Efeitos de condição devem usar modificadores inteiros conhecidos.')
 
 
 class CatalogoBase(models.Model):
@@ -142,12 +153,15 @@ class Condicao(CatalogoBase):
         'self', null=True, blank=True, on_delete=models.SET_NULL, related_name='escalada_de'
     )
     termina_fim_cena = models.BooleanField(default=True)
+    efeitos = models.JSONField(default=dict, blank=True, validators=[validar_efeitos_condicao])
 
 
 class Patente(CatalogoBase):
     pontos_prestigio = models.PositiveIntegerField(default=0)
     credito = models.CharField(max_length=40)
     limites_categoria = models.JSONField(default=dict, blank=True)
+    limite_pd = models.PositiveSmallIntegerField(default=1)
+    recuperacao = models.PositiveSmallIntegerField(default=1)
 
 
 class ConfiguracaoMesa(models.Model):
@@ -166,6 +180,7 @@ class ConfiguracaoMesa(models.Model):
         max_length=8, choices=COMPARTILHAMENTO, default='nao'
     )
     jogador_pode_subir_nex = models.BooleanField(default=False)
+    numero_sessao = models.PositiveIntegerField(default=1)
     max_fichas_ativas = models.PositiveSmallIntegerField(
         default=3, validators=[MinValueValidator(1), MaxValueValidator(20)]
     )
@@ -189,6 +204,13 @@ class ConfiguracaoMesa(models.Model):
 
 
 class Ficha(models.Model):
+    ELEMENTOS_CICATRIZADO = [
+        ('sangue', 'Sangue'),
+        ('morte', 'Morte'),
+        ('conhecimento', 'Conhecimento'),
+        ('energia', 'Energia'),
+        ('medo', 'Medo'),
+    ]
     STATUS = [
         ('ativa', 'Ativa'),
         ('arquivada', 'Arquivada'),
@@ -202,11 +224,21 @@ class Ficha(models.Model):
     classe = models.ForeignKey(Classe, null=True, blank=True, on_delete=models.PROTECT)
     origem = models.ForeignKey(Origem, null=True, blank=True, on_delete=models.PROTECT)
     trilha = models.ForeignKey(Trilha, null=True, blank=True, on_delete=models.PROTECT)
+    trilha_nome_personalizado = models.CharField(max_length=120, blank=True)
+    trilha_resumo_personalizado = models.CharField(max_length=500, blank=True)
+    trilha_fonte_personalizada = models.CharField(max_length=100, blank=True)
     nex = models.PositiveSmallIntegerField(default=5, null=True, blank=True)
     estagio = models.PositiveSmallIntegerField(null=True, blank=True)
     patente = models.ForeignKey(Patente, null=True, blank=True, on_delete=models.PROTECT)
     pontos_prestigio = models.IntegerField(default=0)
-    nivel_experiencia = models.PositiveSmallIntegerField(null=True, blank=True)
+    nivel_experiencia = models.PositiveSmallIntegerField(
+        null=True, blank=True, validators=[MinValueValidator(0), MaxValueValidator(20)],
+    )
+    cicatrizado_elemento = models.CharField(
+        max_length=16, choices=ELEMENTOS_CICATRIZADO, blank=True,
+    )
+    cicatrizado_perigo = models.CharField(max_length=120, blank=True)
+    cicatrizado_sessao_usada = models.PositiveIntegerField(null=True, blank=True)
 
     agilidade = models.PositiveSmallIntegerField(default=1, validators=[MaxValueValidator(5)])
     forca = models.PositiveSmallIntegerField(default=1, validators=[MaxValueValidator(5)])
@@ -248,11 +280,15 @@ class Ficha(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                condition=(Q(nex__isnull=False, estagio__isnull=True) | Q(nex__isnull=True, estagio__isnull=False)),
+                condition=(
+                    Q(nex__isnull=False, estagio__isnull=True, patente__isnull=True)
+                    | Q(nex__isnull=True, estagio__isnull=False, patente__isnull=True)
+                    | Q(nex__isnull=True, estagio__isnull=True, patente__isnull=False)
+                ),
                 name='ficha_uma_progressao',
             ),
             models.CheckConstraint(
-                condition=Q(nex__isnull=True) | Q(nex__in=tuple(range(5, 100, 5)) + (99,)),
+                condition=Q(nex__isnull=True) | Q(nex__gte=0, nex__lte=99),
                 name='ficha_nex_valido',
             ),
             models.CheckConstraint(
@@ -264,10 +300,10 @@ class Ficha(models.Model):
     def clean(self):
         super().clean()
         if self.classe_id and self.classe.slug == 'sobrevivente':
-            if self.nex is not None or self.estagio is None:
-                raise ValidationError('Sobreviventes usam estágio, não NEX.')
-        elif self.classe_id and self.nex is None:
-            raise ValidationError('Esta classe deve usar NEX.')
+            if self.nex is not None or self.estagio is None or self.patente_id:
+                raise ValidationError('Sobreviventes usam estágio, não NEX ou patente.')
+        elif self.classe_id and self.nex is None and not self.patente_id:
+            raise ValidationError('Esta classe deve usar NEX ou patente.')
 
     def __str__(self):
         return self.nome
@@ -307,9 +343,30 @@ class FichaCondicao(models.Model):
     condicao = models.ForeignKey(Condicao, on_delete=models.PROTECT)
     desde = models.DateTimeField(auto_now_add=True)
     anotacao = models.CharField(max_length=300, blank=True)
+    turnos_morrendo = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=('ficha', 'condicao'), name='ficha_condicao_unica')]
+
+
+class FerimentoDebilitante(models.Model):
+    ATRIBUTOS = [
+        ('agilidade', 'Agilidade'),
+        ('forca', 'Força'),
+        ('intelecto', 'Intelecto'),
+        ('presenca', 'Presença'),
+        ('vigor', 'Vigor'),
+        ('superficial', 'Superficial (sem atributo afetado)'),
+    ]
+
+    ficha = models.ForeignKey(Ficha, on_delete=models.CASCADE, related_name='ferimentos')
+    atributo = models.CharField(max_length=16, choices=ATRIBUTOS)
+    tratamento_aprovado_em = models.DateTimeField(null=True, blank=True)
+    curado_em = models.DateTimeField(null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('criado_em', 'pk')
 
 
 class ItemInventario(models.Model):
@@ -332,7 +389,25 @@ class Pendencia(models.Model):
     tipo = models.CharField(max_length=40)
     descricao = models.CharField(max_length=240)
     fonte = models.CharField(max_length=100)
+    quantidade = models.PositiveSmallIntegerField(default=1, validators=[MinValueValidator(1), MaxValueValidator(99)])
     resolvida = models.BooleanField(default=False)
+    criada_em = models.DateTimeField(auto_now_add=True)
+
+
+class RegistroPrestigio(models.Model):
+    EVENTOS = [
+        ('solucao', 'Solução do caso (+10)'),
+        ('pista', 'Pista adicional encontrada (+2)'),
+        ('inocente', 'Morte de inocente (-2)'),
+        ('membro', 'Morte de membro do grupo (-5)'),
+    ]
+
+    ficha = models.ForeignKey(Ficha, on_delete=models.CASCADE, related_name='registros_prestigio')
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    numero_sessao = models.PositiveIntegerField()
+    evento = models.CharField(max_length=12, choices=EVENTOS)
+    quantidade = models.PositiveSmallIntegerField(default=1)
+    delta = models.SmallIntegerField()
     criada_em = models.DateTimeField(auto_now_add=True)
 
 
@@ -349,6 +424,48 @@ class Rolagem(models.Model):
     total = models.IntegerField()
     secreta = models.BooleanField(default=False)
     criada_em = models.DateTimeField(auto_now_add=True)
+
+
+class EncontroCombate(models.Model):
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    nome = models.CharField(max_length=100)
+    rodada = models.PositiveIntegerField(default=1)
+    indice_turno = models.SmallIntegerField(default=-1)
+    ativo = models.BooleanField(default=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('-ativo', '-criado_em', '-pk')
+
+
+class ParticipanteCombate(models.Model):
+    encontro = models.ForeignKey(EncontroCombate, on_delete=models.CASCADE, related_name='participantes')
+    ficha = models.ForeignKey(
+        Ficha, null=True, blank=True, on_delete=models.PROTECT, related_name='participacoes_combate',
+    )
+    ameaca = models.ForeignKey(
+        'core.AmeacaMesa', null=True, blank=True, on_delete=models.PROTECT,
+        related_name='participacoes_combate',
+    )
+    nome = models.CharField(max_length=120)
+    iniciativa = models.SmallIntegerField()
+    surpreendido = models.BooleanField(default=False)
+    acao_padrao_usada = models.BooleanField(default=False)
+    acoes_movimento_usadas = models.PositiveSmallIntegerField(default=0)
+    acao_completa_usada = models.BooleanField(default=False)
+    reacao_defensiva_usada = models.BooleanField(default=False)
+    pe_gasto_turno = models.PositiveSmallIntegerField(default=0)
+    pd_gasto_turno = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ('-iniciativa', 'pk')
+        constraints = [
+            models.UniqueConstraint(
+                fields=('encontro', 'ficha'), condition=models.Q(ficha__isnull=False),
+                name='combate_ficha_unica',
+            ),
+        ]
 
 
 class LogAlteracao(models.Model):

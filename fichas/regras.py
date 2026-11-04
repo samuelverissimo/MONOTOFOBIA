@@ -12,8 +12,21 @@ CLASSES = {
     'sobrevivente': {'pv': (8, 2), 'pe': (2, 1), 'san': (8, 2), 'pd': (4, 2), 'pericias': 1},
 }
 NEX_VALIDOS = tuple(range(5, 100, 5)) + (99,)
+NIVEIS_EXPERIENCIA_VALIDOS = tuple(range(1, 21))
 GRAUS_PERICIA = {'destreinado': 0, 'treinado': 5, 'veterano': 10, 'expert': 15}
 ATRIBUTOS = ('agilidade', 'forca', 'intelecto', 'presenca', 'vigor')
+CAMPOS_EFEITOS_CONDICAO = (
+    'dados_teste',
+    'dados_pericia',
+    'dados_ataque',
+    'dados_ataque_luta',
+    'dados_atributo_agilidade_forca_vigor',
+    'dados_atributo_intelecto_presenca',
+    'dados_pericia_agilidade_forca',
+    'dados_pericia_percepcao',
+    'dados_pericia_reflexos',
+    'bonus_defesa',
+)
 
 
 def _classe(classe):
@@ -37,6 +50,13 @@ def _niveis_nex(nex):
 def _validar_estagio(estagio):
     if isinstance(estagio, bool) or not isinstance(estagio, int) or not 1 <= estagio <= 5:
         raise ValueError('Estágio deve ser um inteiro entre 1 e 5.')
+
+
+def nex_equivalente_por_nivel(nivel):
+    """Converte nível de experiência no NEX usado pela progressão de classe. SaH p. 98."""
+    if isinstance(nivel, bool) or not isinstance(nivel, int) or nivel not in NIVEIS_EXPERIENCIA_VALIDOS:
+        raise ValueError('Nível de experiência deve ficar entre 1 e 20.')
+    return 99 if nivel == 20 else nivel * 5
 
 
 def calcular_pv_max(classe, vigor, nex=5, estagio=1, ajuste=0):
@@ -127,6 +147,49 @@ def bonus_pericia(grau, bonus_extra=0, kit_disponivel=True, penalidade_carga=0):
     return GRAUS_PERICIA[chave] + bonus_extra - (0 if kit_disponivel else 5) + penalidade_carga
 
 
+def modificadores_condicoes(condicoes, *, tipo, atributo=None, pericia_slug=None):
+    """Soma efeitos numéricos de condições nos testes e na Defesa."""
+    dados = 0
+    defesa = 0
+    for condicao in condicoes:
+        efeitos = getattr(condicao, 'efeitos', {})
+        if not isinstance(efeitos, Mapping) or any(
+            chave not in CAMPOS_EFEITOS_CONDICAO
+            or type(valor) is not int
+            or abs(valor) > 10
+            for chave, valor in efeitos.items()
+        ):
+            raise ValueError('Efeitos de condição inválidos.')
+
+        defesa += efeitos.get('bonus_defesa', 0)
+        dados += efeitos.get('dados_teste', 0)
+        if tipo == 'pericia':
+            dados += efeitos.get('dados_pericia', 0)
+            if pericia_slug in ('luta', 'pontaria'):
+                dados += efeitos.get('dados_ataque', 0)
+            if pericia_slug == 'luta':
+                dados += efeitos.get('dados_ataque_luta', 0)
+            if pericia_slug == 'percepcao':
+                dados += efeitos.get('dados_pericia_percepcao', 0)
+            if pericia_slug == 'reflexos':
+                dados += efeitos.get('dados_pericia_reflexos', 0)
+            if atributo in ('agilidade', 'forca'):
+                dados += efeitos.get('dados_pericia_agilidade_forca', 0)
+            if atributo in ('agilidade', 'forca', 'vigor'):
+                dados += efeitos.get('dados_atributo_agilidade_forca_vigor', 0)
+            if atributo in ('intelecto', 'presenca'):
+                dados += efeitos.get('dados_atributo_intelecto_presenca', 0)
+        elif tipo == 'atributo':
+            if atributo in ('agilidade', 'forca', 'vigor'):
+                dados += efeitos.get('dados_atributo_agilidade_forca_vigor', 0)
+            if atributo in ('intelecto', 'presenca'):
+                dados += efeitos.get('dados_atributo_intelecto_presenca', 0)
+        elif tipo != 'livre':
+            raise ValueError('Tipo de teste inválido.')
+
+    return {'dados_extras': dados, 'bonus': 0, 'defesa': defesa}
+
+
 def pericias_treinadas_disponiveis(classe, intelecto):
     """Escolhas adicionais por classe e Intelecto. OPRPG pp. 25, 29, 33; SaH p. 30."""
     classe = _classe(classe)
@@ -151,12 +214,11 @@ def validar_atributos_iniciais(atributos, classe='combatente', livre=False):
     return True
 
 
-def rolar_teste(atributo, bonus_pericia=0, dados_extras=0, bonus=0, rng=None):
-    """Rola d20, com atributos 0 e pools negativas conforme OPRPG pp. 11 e 40."""
+def parametros_teste(atributo, dados_extras=0):
+    """Calcula a quantidade e a ordem de escolha dos dados de um teste."""
     _validar_atributo(atributo)
     if isinstance(dados_extras, bool) or not isinstance(dados_extras, int):
         raise ValueError('Dados extras devem ser inteiros.')
-    gerador = rng if rng is not None else secrets.SystemRandom()
 
     if atributo == 0:
         quantidade = 2 + dados_extras
@@ -172,14 +234,50 @@ def rolar_teste(atributo, bonus_pericia=0, dados_extras=0, bonus=0, rng=None):
             dados = quantidade
             escolher_menor = False
 
-    resultados = [gerador.randint(1, 20) for _ in range(dados)]
+    return dados, escolher_menor
+
+
+def avaliar_teste_fisico(atributo, dados, bonus_pericia=0, dados_extras=0, bonus=0, dt=None):
+    """Avalia os d20 rolados fisicamente sem gerar novas rolagens."""
+    quantidade, escolher_menor = parametros_teste(atributo, dados_extras)
+    if any(type(valor) is not int for valor in (bonus_pericia, bonus)):
+        raise ValueError('Bônus de teste devem ser inteiros.')
+    if type(dados) is not list or len(dados) != quantidade:
+        raise ValueError(f'Informe exatamente {quantidade} resultados de d20.')
+    if any(type(dado) is not int or not 1 <= dado <= 20 for dado in dados):
+        raise ValueError('Cada resultado físico deve ser um inteiro entre 1 e 20.')
+    if dt is not None and (type(dt) is not int or not 1 <= dt <= 1000):
+        raise ValueError('A DT deve ser um inteiro entre 1 e 1000.')
+
+    escolhido = min(dados) if escolher_menor else max(dados)
+    total_bonus = bonus_pericia + bonus
+    return {
+        'dados': dados,
+        'dado_escolhido': escolhido,
+        'ordem': 'menor' if escolher_menor else 'maior',
+        'quantidade_dados': quantidade,
+        'bonus': total_bonus,
+        'total': escolhido + total_bonus,
+        'dt': dt,
+        'sucesso': escolhido + total_bonus >= dt if dt is not None else None,
+    }
+
+
+def rolar_teste(atributo, bonus_pericia=0, dados_extras=0, bonus=0, rng=None):
+    """Rola d20, com atributos 0 e pools negativas conforme OPRPG pp. 11 e 40."""
+    quantidade, escolher_menor = parametros_teste(atributo, dados_extras)
+    gerador = rng if rng is not None else secrets.SystemRandom()
+    resultados = [gerador.randint(1, 20) for _ in range(quantidade)]
     escolhido = min(resultados) if escolher_menor else max(resultados)
     return {
         'dados': resultados,
         'dado_escolhido': escolhido,
         'ordem': 'menor' if escolher_menor else 'maior',
+        'quantidade_dados': quantidade,
         'bonus': bonus_pericia + bonus,
         'total': escolhido + bonus_pericia + bonus,
+        'dt': None,
+        'sucesso': None,
     }
 
 
@@ -196,6 +294,25 @@ def rolar_dano(quantidade_dados, faces, bonus=0, multiplicador_critico=1, rng=No
         for _ in range(quantidade_dados * multiplicador_critico)
     ]
     return {'dados': resultados, 'bonus': bonus, 'total': sum(resultados) + bonus}
+
+
+def avaliar_dano_fisico(quantidade_dados, faces, dados, bonus=0, multiplicador_critico=1):
+    """Avalia dados de dano rolados fisicamente; crítico multiplica apenas os dados."""
+    valores = (quantidade_dados, faces, bonus, multiplicador_critico)
+    if any(isinstance(v, bool) or not isinstance(v, int) for v in valores):
+        raise ValueError('Dados, faces, bônus e multiplicador devem ser inteiros.')
+    if not 1 <= quantidade_dados <= 30 or not 2 <= faces <= 100:
+        raise ValueError('Informe de 1 a 30 dados com 2 a 100 faces.')
+    if not 1 <= multiplicador_critico <= 10 or abs(bonus) > 1000:
+        raise ValueError('Bônus ou multiplicador de crítico inválido.')
+    if type(dados) is not list or len(dados) != quantidade_dados * multiplicador_critico:
+        raise ValueError('A quantidade de resultados deve corresponder aos dados, incluindo o crítico.')
+    if any(
+        isinstance(resultado, bool) or not isinstance(resultado, int) or not 1 <= resultado <= faces
+        for resultado in dados
+    ):
+        raise ValueError(f'Cada resultado deve ser um inteiro entre 1 e {faces}.')
+    return {'dados': dados, 'bonus': bonus, 'total': sum(dados) + bonus}
 
 
 def pendencias_ao_subir_nex(classe, nex_anterior, nex_novo, intelecto=0):
@@ -218,6 +335,7 @@ def pendencias_ao_subir_nex(classe, nex_anterior, nex_novo, intelecto=0):
                 'tipo': 'treinamento',
                 'descricao': f'Aprimorar {5 + intelecto} perícias em um grau.',
                 'fonte': 'OPRPG p. 25',
+                'quantidade': 5 + intelecto,
             })
         if nex == 50:
             pendencias.append({'tipo': 'versatilidade', 'descricao': 'Escolher versatilidade.', 'fonte': 'OPRPG p. 25'})
@@ -226,4 +344,39 @@ def pendencias_ao_subir_nex(classe, nex_anterior, nex_novo, intelecto=0):
             pendencias.append({'tipo': 'poder', 'descricao': f'Escolher {tipo}.', 'fonte': 'OPRPG p. 25'})
         if classe == 'ocultista':
             pendencias.append({'tipo': 'ritual', 'descricao': 'Aprender um ritual.', 'fonte': 'OPRPG p. 33'})
+    return pendencias
+
+
+def pendencias_ao_subir_estagio(estagio_anterior, estagio_novo):
+    """Gera escolhas do Sobrevivente ao avançar de estágio. SaH pp. 30-31."""
+    _validar_estagio(estagio_anterior)
+    _validar_estagio(estagio_novo)
+    if estagio_novo <= estagio_anterior:
+        raise ValueError('A progressão deve avançar para um estágio maior.')
+
+    pendencias = []
+    for estagio in range(estagio_anterior + 1, estagio_novo + 1):
+        if estagio == 2:
+            pendencias.extend((
+                {'tipo': 'trilha', 'descricao': 'Escolher uma trilha de Sobrevivente.', 'fonte': 'SaH p.31'},
+                {'tipo': 'poder', 'descricao': 'Registrar a primeira habilidade da trilha.', 'fonte': 'SaH p.31'},
+            ))
+        elif estagio == 3:
+            pendencias.append({
+                'tipo': 'atributo',
+                'descricao': 'Aumentar um atributo em +1 (máximo 3).',
+                'fonte': 'SaH p.31',
+            })
+        elif estagio == 4:
+            pendencias.append({
+                'tipo': 'poder',
+                'descricao': 'Registrar a segunda habilidade da trilha.',
+                'fonte': 'SaH p.31',
+            })
+        elif estagio == 5:
+            pendencias.append({
+                'tipo': 'cicatrizado',
+                'descricao': 'Escolher o perigo paranormal que deixou uma cicatriz.',
+                'fonte': 'SaH p.31',
+            })
     return pendencias

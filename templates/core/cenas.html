@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Cenas da mesa | MONOTOFOBIA{% endblock %}
+
+{% block content %}
+<div class="page form-page">
+    <header class="topbar">
+        <a href="{% url 'home' %}">Voltar às fichas</a>
+        {% if mestre %}<a href="{% url 'painel_mestre' %}">Painel do mestre</a>{% endif %}
+    </header>
+    <main>
+        <h1>Cenas da mesa</h1>
+        {% if mestre %}
+            <section aria-labelledby="create-scene-heading">
+                <h2 id="create-scene-heading">Criar cena</h2>
+                <p>As cenas começam ocultas. Ative-as para mostrar aos jogadores apenas a descrição pública e pistas reveladas.</p>
+                <form method="post" action="{% url 'criar_cena' %}">
+                    {% csrf_token %}
+                    {{ formulario_cena.as_p }}
+                    <button class="button" type="submit">Criar cena</button>
+                </form>
+            </section>
+        {% endif %}
+        <section aria-labelledby="scene-list-heading">
+            <h2 id="scene-list-heading">{% if mestre %}Cenas cadastradas{% else %}Cenas abertas{% endif %}</h2>
+            <ul class="sheet-list">
+                {% for cena in cenas %}
+                    <li>
+                        <a href="{% url 'detalhe_cena' cena.pk %}">{{ cena.nome }}</a>
+                        <span>{{ cena.get_tipo_display }}{% if mestre %} · {% if cena.ativa %}Visível aos jogadores{% else %}Oculta{% endif %}{% endif %}</span>
+                    </li>
+                {% empty %}
+                    <li>Nenhuma cena disponível.</li>
+                {% endfor %}
+            </ul>
+        </section>
+    </main>
+</div>
+{% endblock %}
