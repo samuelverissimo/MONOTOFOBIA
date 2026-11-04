@@ -128,7 +128,7 @@ Para Linux/macOS, ative com `source .venv/bin/activate`; os demais comandos Djan
 
 ## Estado para continuar em outra máquina — 2026-11-04
 
-- O proprietário confirmou que o repositório está privado. O trabalho desta atualização será publicado na `main`; depois do push, na outra máquina use `git pull` para obter código, testes, documentação e migrations.
+- O proprietário confirmou que o repositório está privado. O trabalho desta atualização foi publicado na `main` no commit `e952afe`; na outra máquina use `git pull` para obter código, testes, documentação e migrations.
 - Esta rodada inclui gestão de mesas públicas/privadas com código, inscrição/remoção de fichas, painel unificado do mestre, habilidades personalizadas na ficha, atualização da ficha após mudanças de configuração da mesa, campos e escolhas iniciais de progressão/treinamento/trilha, perfil de conta e padronização visual/transições.
 - Recursos atuais PV/PE/SAN/PD podem exceder o máximo; a diferença é temporária no próprio recurso. Ajustes nunca reduzem abaixo de zero e dano consome primeiro o excedente de PV. A migration `fichas.0016_recurso_temporario_em_excesso_e_prerequisitos_trilha` soma o antigo `pv_temporario` a `pv_atual` e adiciona `Trilha.pre_requisitos`.
 - O erro ocorrido ao abrir a etapa final de criação foi causado pela migration 0016 ainda pendente no SQLite local. Ela foi aplicada e verificada nesta máquina. Em outra máquina, execute `python manage.py migrate` antes de iniciar o servidor.
