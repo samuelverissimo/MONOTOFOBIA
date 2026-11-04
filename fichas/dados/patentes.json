@@ -1,0 +1,7 @@
+[
+  {"nome":"Recruta","slug":"recruta","fonte":"OPRPG p.52","personalizado":false,"resumo":"Agente novato.","pontos_prestigio":0,"credito":"Baixo","limites_categoria":{"I":2,"II":0,"III":0,"IV":0}},
+  {"nome":"Operador","slug":"operador","fonte":"OPRPG p.52","personalizado":false,"resumo":"Agente com experiência em casos paranormais.","pontos_prestigio":20,"credito":"Médio","limites_categoria":{"I":3,"II":1,"III":0,"IV":0}},
+  {"nome":"Agente Especial","slug":"agente-especial","fonte":"OPRPG p.52","personalizado":false,"resumo":"Agente experiente designado a casos complexos.","pontos_prestigio":50,"credito":"Médio","limites_categoria":{"I":3,"II":2,"III":1,"IV":0}},
+  {"nome":"Oficial de Operações","slug":"oficial-de-operacoes","fonte":"OPRPG p.52","personalizado":false,"resumo":"Agente experiente em missões de alta importância e perigo.","pontos_prestigio":100,"credito":"Alto","limites_categoria":{"I":3,"II":3,"III":2,"IV":1}},
+  {"nome":"Agente de Elite","slug":"agente-de-elite","fonte":"OPRPG p.52","personalizado":false,"resumo":"Agente veterano com acesso ilimitado aos recursos da Ordem.","pontos_prestigio":200,"credito":"Ilimitado","limites_categoria":{"I":3,"II":3,"III":3,"IV":2}}
+]

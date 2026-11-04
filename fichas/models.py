@@ -38,8 +38,17 @@ class Pericia(CatalogoBase):
     exige_kit = models.BooleanField(default=False)
 
 
+class Atributo(CatalogoBase):
+    ordem = models.PositiveSmallIntegerField(default=0)
+
+    class Meta(CatalogoBase.Meta):
+        ordering = ('ordem', 'nome')
+
+
 class Origem(CatalogoBase):
     pericias_treinadas = models.ManyToManyField(Pericia, related_name='origens', blank=True)
+    pericias_especializadas = models.JSONField(default=dict, blank=True)
+    escolhas_pericia = models.PositiveSmallIntegerField(default=0)
     poder_nome = models.CharField(max_length=120)
     poder_resumo = models.TextField(validators=RESUMO_VALIDATORS)
 

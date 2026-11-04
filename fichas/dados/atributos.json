@@ -1,0 +1,7 @@
+[
+  {"nome":"Agilidade","slug":"agilidade","fonte":"OPRPG p.14","personalizado":false,"resumo":"Coordenação, destreza e rapidez de reação.","ordem":1},
+  {"nome":"Força","slug":"forca","fonte":"OPRPG p.14","personalizado":false,"resumo":"Potência física, esforço e capacidade de carga.","ordem":2},
+  {"nome":"Intelecto","slug":"intelecto","fonte":"OPRPG p.14","personalizado":false,"resumo":"Raciocínio, memória e conhecimento.","ordem":3},
+  {"nome":"Presença","slug":"presenca","fonte":"OPRPG p.14","personalizado":false,"resumo":"Personalidade, influência e força interior.","ordem":4},
+  {"nome":"Vigor","slug":"vigor","fonte":"OPRPG p.14","personalizado":false,"resumo":"Resistência física e tolerância a esforço.","ordem":5}
+]

@@ -4,7 +4,7 @@ from django.core.management.base import CommandError
 from django.test import SimpleTestCase, TestCase
 from django.utils.crypto import get_random_string
 
-from fichas.models import ConfiguracaoMesa, Ficha
+from fichas.models import Atributo, Classe, Condicao, ConfiguracaoMesa, Ficha, Origem, Patente, Pericia
 from fichas.permissions import fichas_visiveis_para, is_mestre, pode_editar_ficha, pode_ver_ficha
 from fichas.regras import (
     bonus_pericia,
@@ -127,3 +127,35 @@ class MesaAndMasterCommandTests(TestCase):
     def test_definir_mestre_errors_for_unknown_user(self):
         with self.assertRaises(CommandError):
             call_command('definir_mestre', 'inexistente')
+
+
+class CarregarRegrasTests(TestCase):
+    def test_loads_priority_catalogs_and_sources(self):
+        call_command('carregar_regras', stdout=None)
+
+        self.assertEqual(Atributo.objects.count(), 5)
+        self.assertEqual(Pericia.objects.count(), 28)
+        self.assertEqual(Classe.objects.count(), 4)
+        self.assertEqual(Condicao.objects.count(), 38)
+        self.assertEqual(Patente.objects.count(), 5)
+        self.assertEqual(Origem.objects.count(), 46)
+        self.assertFalse(Atributo.objects.filter(fonte='').exists())
+        self.assertEqual(Origem.objects.get(slug='amnesico').escolhas_pericia, 2)
+        self.assertEqual(Origem.objects.get(slug='academico').pericias_treinadas.count(), 2)
+        self.assertEqual(
+            Condicao.objects.get(slug='fraco').proxima_escalada.slug,
+            'debilitado',
+        )
+
+    def test_reloading_updates_records_without_duplicates(self):
+        call_command('carregar_regras', stdout=None)
+        pericia = Pericia.objects.get(slug='acrobacia')
+        original_pk = pericia.pk
+        pericia.resumo = 'Resumo local alterado.'
+        pericia.save(update_fields=('resumo',))
+
+        call_command('carregar_regras', stdout=None)
+
+        self.assertEqual(Pericia.objects.count(), 28)
+        self.assertEqual(Pericia.objects.get(slug='acrobacia').pk, original_pk)
+        self.assertIn('penalidade de carga', Pericia.objects.get(slug='acrobacia').resumo)
