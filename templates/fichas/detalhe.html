@@ -68,6 +68,48 @@
                 </ul>
             </section>
         {% endif %}
+        <section id="inventario" aria-labelledby="inventory-heading">
+            <h2 id="inventory-heading">Inventário</h2>
+            <p>Espaços ocupados: {{ carga_usada }} / {{ carga_maxima }}{% if carga_excedida %} · Carga excedida{% endif %}</p>
+            <ul class="inventory-list">
+                {% for item in itens_inventario %}
+                    <li>
+                        <div>
+                            <strong>{{ item.nome }}</strong>
+                            <span>{{ item.quantidade }} × {{ item.espacos }} espaços · Categoria {{ item.categoria }} · {{ item.get_estado_display }}</span>
+                            {% if item.notas %}<p>{{ item.notas }}</p>{% endif %}
+                        </div>
+                        {% if pode_editar %}
+                            <div class="inventory-actions">
+                                <form method="post" action="{% url 'fichas:atualizar_item' ficha.pk item.pk %}">
+                                    {% csrf_token %}
+                                    <label>Quantidade <input type="number" name="quantidade" min="1" max="999" value="{{ item.quantidade }}" required></label>
+                                    <label>Estado
+                                        <select name="estado">
+                                            {% for valor, rotulo in estados_item %}<option value="{{ valor }}"{% if item.estado == valor %} selected{% endif %}>{{ rotulo }}</option>{% endfor %}
+                                        </select>
+                                    </label>
+                                    <button class="button button-secondary" type="submit">Atualizar</button>
+                                </form>
+                                <form method="post" action="{% url 'fichas:remover_item' ficha.pk item.pk %}">
+                                    {% csrf_token %}
+                                    <button class="button button-secondary" type="submit">Remover</button>
+                                </form>
+                            </div>
+                        {% endif %}
+                    </li>
+                {% empty %}
+                    <li>Nenhum item cadastrado.</li>
+                {% endfor %}
+            </ul>
+            {% if pode_editar %}
+                <form class="inventory-add" method="post" action="{% url 'fichas:adicionar_item' ficha.pk %}">
+                    {% csrf_token %}
+                    {{ formulario_item.as_p }}
+                    <button class="button" type="submit">Adicionar item</button>
+                </form>
+            {% endif %}
+        </section>
         {% if pode_avancar_nex %}
             <section aria-labelledby="progression-heading">
                 <h2 id="progression-heading">Progressão</h2>

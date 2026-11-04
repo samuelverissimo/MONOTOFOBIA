@@ -16,6 +16,8 @@ from .forms import (
     ClasseFichaForm,
     ConceitoFichaForm,
     FichaEdicaoForm,
+    ItemInventarioAjusteForm,
+    ItemInventarioForm,
     OrigemFichaForm,
     PericiasFichaForm,
     RevisaoFichaForm,
@@ -27,13 +29,14 @@ from .models import (
     Ficha,
     FichaCondicao,
     FichaPericia,
+    ItemInventario,
     LogAlteracao,
     Origem,
     Pericia,
     Pendencia,
     Rolagem,
 )
-from .permissions import fichas_visiveis_para, is_mestre
+from .permissions import fichas_visiveis_para, is_mestre, pode_editar_ficha
 from .regras import (
     ATRIBUTOS,
     NEX_VALIDOS,
@@ -42,6 +45,8 @@ from .regras import (
     calcular_pe_max,
     calcular_pv_max,
     calcular_san_max,
+    capacidade_carga,
+    espacos_usados,
     pendencias_ao_subir_nex,
     rolar_teste,
 )
@@ -299,6 +304,73 @@ def alterar_condicao(request, pk):
 
 @login_required
 @require_POST
+def adicionar_item(request, pk):
+    ficha = _ficha_editavel(request, pk)
+    form = ItemInventarioForm(request.POST)
+    if not form.is_valid():
+        return render(
+            request, 'fichas/detalhe.html',
+            _contexto_detalhe(request, ficha, formulario_item=form), status=400,
+        )
+    with transaction.atomic():
+        ficha = Ficha.objects.select_for_update().get(pk=ficha.pk)
+        item = ItemInventario.objects.create(ficha=ficha, **form.cleaned_data)
+        LogAlteracao.objects.create(
+            ficha=ficha, usuario=request.user, e_mestre=is_mestre(request.user),
+            campo='inventario', valor_novo=item.nome,
+        )
+    messages.success(request, 'Item adicionado ao inventário.')
+    return redirect('fichas:detalhe', pk=pk)
+
+
+@login_required
+@require_POST
+def atualizar_item(request, pk, item_pk):
+    ficha = _ficha_editavel(request, pk)
+    item = get_object_or_404(ItemInventario.objects.filter(ficha=ficha), pk=item_pk)
+    form = ItemInventarioAjusteForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, 'Quantidade ou estado inválido; o item não foi alterado.')
+        return redirect('fichas:detalhe', pk=pk)
+    with transaction.atomic():
+        item = get_object_or_404(
+            ItemInventario.objects.select_for_update().filter(ficha=ficha), pk=item_pk
+        )
+        antigo = {'quantidade': item.quantidade, 'estado': item.estado}
+        novo = form.cleaned_data
+        for campo, valor in novo.items():
+            setattr(item, campo, valor)
+        item.save(update_fields=('quantidade', 'estado'))
+        for campo, valor in novo.items():
+            if antigo[campo] != valor:
+                LogAlteracao.objects.create(
+                    ficha=ficha, usuario=request.user, e_mestre=is_mestre(request.user),
+                    campo=f'inventario.{campo}', valor_antigo=str(antigo[campo]), valor_novo=str(valor),
+                )
+    messages.success(request, 'Item atualizado.')
+    return redirect('fichas:detalhe', pk=pk)
+
+
+@login_required
+@require_POST
+def remover_item(request, pk, item_pk):
+    ficha = _ficha_editavel(request, pk)
+    with transaction.atomic():
+        item = get_object_or_404(
+            ItemInventario.objects.select_for_update().filter(ficha=ficha), pk=item_pk
+        )
+        nome = item.nome
+        item.delete()
+        LogAlteracao.objects.create(
+            ficha=ficha, usuario=request.user, e_mestre=is_mestre(request.user),
+            campo='inventario', valor_antigo=nome,
+        )
+    messages.success(request, 'Item removido do inventário.')
+    return redirect('fichas:detalhe', pk=pk)
+
+
+@login_required
+@require_POST
 @ratelimit(key='user', rate='30/m', method='POST', block=True)
 def rolar_ficha(request, pk):
     conteudo, erro = _ler_json(request, ('tipo', 'alvo', 'bonus'))
@@ -412,7 +484,7 @@ def criar_ficha(request, etapa):
     })
 
 
-def _contexto_detalhe(request, ficha, formulario_avanco=None):
+def _contexto_detalhe(request, ficha, formulario_avanco=None, formulario_item=None):
     ativas = ficha.condicoes.select_related('condicao').order_by('condicao__nome')
     ids_condicoes_ativas = ativas.values_list('condicao_id', flat=True)
     classe = ficha.classe.slug if ficha.classe_id else None
@@ -440,6 +512,12 @@ def _contexto_detalhe(request, ficha, formulario_avanco=None):
             nex_atual=ficha.nex,
             initial={'nex_novo': proximo_nex, 'versao': ficha.versao},
         )
+    pode_editar = pode_editar_ficha(request.user, ficha)
+    if formulario_item is None and pode_editar:
+        formulario_item = ItemInventarioForm()
+    itens_inventario = list(ficha.inventario.order_by('nome', 'pk'))
+    carga_usada = espacos_usados(itens_inventario)
+    carga_maxima = capacidade_carga(ficha.forca)
     return {
         'ficha': ficha,
         'ficha_pericias': ficha.pericias.select_related('pericia').order_by('pericia__nome'),
@@ -451,6 +529,13 @@ def _contexto_detalhe(request, ficha, formulario_avanco=None):
         'pendencias': ficha.pendencias.filter(resolvida=False).order_by('criada_em', 'pk'),
         'pode_avancar_nex': pode_avancar,
         'formulario_avanco': formulario_avanco,
+        'formulario_item': formulario_item,
+        'itens_inventario': itens_inventario,
+        'carga_usada': carga_usada,
+        'carga_maxima': carga_maxima,
+        'carga_excedida': carga_usada > carga_maxima,
+        'pode_editar': pode_editar,
+        'estados_item': ItemInventario.ESTADOS,
         'mestre': is_mestre(request.user),
     }
 

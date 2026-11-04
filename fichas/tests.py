@@ -13,6 +13,7 @@ from fichas.models import (
     Ficha,
     FichaCondicao,
     FichaPericia,
+    ItemInventario,
     LogAlteracao,
     Origem,
     Patente,
@@ -37,7 +38,7 @@ from fichas.regras import (
     rolar_teste,
     validar_atributos_iniciais,
 )
-from fichas.forms import AtributosFichaForm, ConceitoFichaForm, FichaEdicaoForm
+from fichas.forms import AtributosFichaForm, ConceitoFichaForm, FichaEdicaoForm, ItemInventarioForm
 
 User = get_user_model()
 
@@ -138,6 +139,19 @@ class FichaWizardFormTests(SimpleTestCase):
         self.assertIn('versao', jogador)
         self.assertNotIn('status', jogador)
         self.assertNotIn('nex', jogador)
+
+
+class FichaInventarioFormTests(SimpleTestCase):
+    def test_inventory_form_accepts_only_known_categories_states_and_bounds(self):
+        dados = {
+            'nome': 'Lanterna', 'categoria': 'I', 'espacos': 1,
+            'quantidade': 2, 'estado': 'guardado', 'notas': '',
+        }
+        self.assertTrue(ItemInventarioForm(dados).is_valid())
+        self.assertFalse(ItemInventarioForm({**dados, 'categoria': 'V'}).is_valid())
+        self.assertFalse(ItemInventarioForm({**dados, 'espacos': -1}).is_valid())
+        self.assertFalse(ItemInventarioForm({**dados, 'quantidade': 0}).is_valid())
+        self.assertFalse(ItemInventarioForm({**dados, 'estado': 'voando'}).is_valid())
 
 
 class FichaPermissionTests(TestCase):
@@ -320,6 +334,54 @@ class FichaViewsTests(TestCase):
             data='{"recurso":"pv","delta":1}', content_type='application/json',
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_inventory_add_update_delete_and_capacity(self):
+        self.client.force_login(self.owner)
+        add_url = reverse('fichas:adicionar_item', kwargs={'pk': self.ficha.pk})
+        response = self.client.post(add_url, {
+            'nome': 'Kit de campo', 'categoria': 'I', 'espacos': 2,
+            'quantidade': 3, 'estado': 'guardado', 'notas': 'nota privada',
+            'dono': self.other.pk, 'ficha': self.ficha.pk + 100,
+        })
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        item = ItemInventario.objects.get(ficha=self.ficha)
+        self.assertEqual((item.nome, item.quantidade, item.ficha_id), ('Kit de campo', 3, self.ficha.pk))
+        self.assertEqual(espacos_usados(list(self.ficha.inventario.all())), 6)
+        self.assertFalse(LogAlteracao.objects.filter(valor_novo='nota privada').exists())
+        self.assertContains(self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk})), 'Carga excedida')
+
+        response = self.client.post(
+            reverse('fichas:atualizar_item', kwargs={'pk': self.ficha.pk, 'item_pk': item.pk}),
+            {'quantidade': 2, 'estado': 'empunhado'},
+        )
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        item.refresh_from_db()
+        self.assertEqual((item.quantidade, item.estado), (2, 'empunhado'))
+        self.assertEqual(espacos_usados(list(self.ficha.inventario.all())), 4)
+
+        response = self.client.post(
+            reverse('fichas:remover_item', kwargs={'pk': self.ficha.pk, 'item_pk': item.pk}),
+        )
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.assertFalse(ItemInventario.objects.filter(pk=item.pk).exists())
+
+    def test_inventory_is_scoped_and_rejects_invalid_values(self):
+        item = ItemInventario.objects.create(
+            ficha=self.ficha, nome='Lanterna', categoria='0', espacos=1, quantidade=1,
+        )
+        self.client.force_login(self.other)
+        response = self.client.post(reverse('fichas:remover_item', kwargs={
+            'pk': self.ficha.pk, 'item_pk': item.pk,
+        }))
+        self.assertEqual(response.status_code, 404)
+
+        self.client.force_login(self.owner)
+        response = self.client.post(reverse('fichas:adicionar_item', kwargs={'pk': self.ficha.pk}), {
+            'nome': 'Item inválido', 'categoria': 'V', 'espacos': -1,
+            'quantidade': 0, 'estado': 'voando',
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ItemInventario.objects.filter(ficha=self.ficha).count(), 1)
 
 
 class ProgressaoNexViewsTests(TestCase):

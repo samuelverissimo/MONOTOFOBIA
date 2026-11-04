@@ -40,6 +40,12 @@ Todos os registros têm `fonte`, `slug` e indicação de `personalizado`. Os res
 - A tela exibe pendências de trilha, poderes, aumento de atributo, treinamento e rituais geradas pela função de progressão; a resolução dessas escolhas ainda não está incluída.
 - Sobrevivente (progressão por estágio), nível de experiência e evolução por patentes permanecem fora deste fluxo. O formulário só aparece quando há próximo NEX disponível e o sistema da mesa está em modo NEX.
 
+## Inventário manual (Fase 5)
+
+- Jogadores gerenciam itens personalizados da própria ficha; mestres podem gerenciar qualquer ficha. O formulário não aceita IDs de ficha, catálogo ou JSON adicional.
+- Quantidade, estado, categoria e espaços usam listas/limites explícitos. A ficha mostra a carga total calculada com `espacos_usados` e a capacidade por Força; exceder a capacidade é sinalizado, não impede registrar itens.
+- O catálogo completo de equipamentos, armas e proteções não foi carregado nesta fase; nomes e descrições dos livros continuam fora dos dados de inventário manual.
+
 ## Limitações de extração
 
 O extrator cria um TXT por página física do PDF. Para o miolo do OPRPG, as amostras confirmam que a página impressa equivale à página PDF menos 10; o campo `fonte` usa a página impressa. Para SaH, as páginas impressas foram conferidas individualmente e não se aplica o deslocamento do livro básico.

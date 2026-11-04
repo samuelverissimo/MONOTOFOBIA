@@ -1,7 +1,7 @@
 from django import forms
 from django.core.exceptions import ValidationError
 
-from fichas.models import Classe, Origem, Pericia
+from fichas.models import Classe, ItemCatalogo, ItemInventario, Origem, Pericia
 from fichas.regras import ATRIBUTOS, NEX_VALIDOS, pericias_treinadas_disponiveis, validar_atributos_iniciais
 
 
@@ -187,3 +187,17 @@ class AvancoNexForm(forms.Form):
         self.fields['nex_novo'].choices = [
             (nex, f'{nex}%') for nex in NEX_VALIDOS if nex > nex_atual
         ]
+
+
+class ItemInventarioForm(forms.Form):
+    nome = forms.CharField(label='Item', max_length=120)
+    categoria = forms.ChoiceField(label='Categoria', choices=ItemCatalogo.CATEGORIAS)
+    espacos = forms.IntegerField(label='Espaços por unidade', min_value=0, max_value=100)
+    quantidade = forms.IntegerField(label='Quantidade', min_value=1, max_value=999)
+    estado = forms.ChoiceField(label='Estado', choices=ItemInventario.ESTADOS)
+    notas = forms.CharField(label='Notas', max_length=500, required=False)
+
+
+class ItemInventarioAjusteForm(forms.Form):
+    quantidade = forms.IntegerField(min_value=1, max_value=999)
+    estado = forms.ChoiceField(choices=ItemInventario.ESTADOS)
