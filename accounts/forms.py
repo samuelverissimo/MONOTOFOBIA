@@ -2,8 +2,19 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.core.exceptions import ValidationError
+import unicodedata
 
 User = get_user_model()
+NOMES_RESERVADOS = {
+    'samukamestre',
+    'mestre',
+    'admin',
+    'administrator',
+    'root',
+    'staff',
+    'suporte',
+    'moderador',
+}
 
 
 class SecureAuthenticationForm(AuthenticationForm):
@@ -22,8 +33,11 @@ class RegisterForm(UserCreationForm):
         fields = ('username', 'email')
 
     def clean_username(self):
-        username = self.cleaned_data['username'].strip()
+        username = unicodedata.normalize('NFKC', self.cleaned_data['username']).strip()
         username = User.normalize_username(username).lower()
+        chave_reservada = ''.join(caractere for caractere in username.casefold() if caractere.isalnum())
+        if chave_reservada in NOMES_RESERVADOS:
+            raise ValidationError('Este nome de usuário não está disponível.')
         if User._default_manager.filter(username__iexact=username).exists():
             raise ValidationError('Este nome de usuário já está em uso.')
         return username

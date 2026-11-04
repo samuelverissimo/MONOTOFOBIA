@@ -11,3 +11,9 @@ media/
 staticfiles/
 .pytest_cache/
 .mypy_cache/
+
+# Livros protegidos e material de campanha não devem ser enviados ao GitHub.
+docs/*.pdf
+docs/**/*.pdf
+docs/regras/texto/
+docs/ARQUIVOS SECRETOS/

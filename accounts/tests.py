@@ -1,6 +1,7 @@
 from axes.models import AccessAttempt
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 from django.utils.crypto import get_random_string
@@ -59,6 +60,31 @@ class RegistrationTests(TestCase):
 
 		self.assertContains(response, 'Já existe uma conta com este e-mail.')
 		self.assertEqual(User.objects.count(), 1)
+
+	def test_registration_rejects_reserved_usernames_with_variations(self):
+		for reserved in ('SAMUKAMESTRE', 'samu ka mestre', 'a.d.m.i.n', 'ROOT'):
+			with self.subTest(username=reserved):
+				response = self.client.post(
+					reverse('register'),
+					self.registration_data(username=reserved),
+				)
+				self.assertContains(response, 'Este nome de usuário não está disponível.')
+		self.assertEqual(User.objects.count(), 0)
+
+	def test_registration_normalizes_case_insensitive_username(self):
+		User.objects.create_user(username='jogador', password=get_random_string(32))
+		response = self.client.post(
+			reverse('register'),
+			self.registration_data(username='JOGADOR'),
+		)
+		self.assertContains(response, 'Este nome de usuário já está em uso.')
+		self.assertEqual(User.objects.count(), 1)
+
+	def test_database_enforces_case_insensitive_username_uniqueness(self):
+		User.objects.create_user(username='NomeUnico', password=get_random_string(32))
+		with self.assertRaises(IntegrityError):
+			with transaction.atomic():
+				User.objects.create_user(username='nomeunico', password=get_random_string(32))
 
 	def test_registration_rejects_password_mismatch(self):
 		response = self.client.post(

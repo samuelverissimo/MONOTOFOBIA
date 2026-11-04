@@ -1,0 +1,1 @@
+"""Aplicação de fichas e regras da mesa."""

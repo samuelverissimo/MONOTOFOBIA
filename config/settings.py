@@ -21,6 +21,7 @@ ADMIN_URL = env('ADMIN_URL', default='gestao-interna/')
 INSTALLED_APPS = [
     'accounts',
     'core',
+    'fichas.apps.FichasConfig',
     'axes',
     'django.contrib.admin',
     'django.contrib.auth',
