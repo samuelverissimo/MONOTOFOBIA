@@ -10,6 +10,7 @@ urlpatterns = [
     path('<int:pk>/recursos/', views.alterar_recurso, name='recurso'),
     path('<int:pk>/condicoes/', views.alterar_condicao, name='condicao'),
     path('<int:pk>/rolar/', views.rolar_ficha, name='rolar'),
+    path('<int:pk>/avancar-nex/', views.avancar_nex, name='avancar_nex'),
     path('<int:pk>/', views.detalhe_ficha, name='detalhe'),
     path('<int:pk>/editar/', views.editar_ficha, name='editar'),
 ]

@@ -33,6 +33,13 @@ Todos os registros têm `fonte`, `slug` e indicação de `personalizado`. Os res
 - Opções de nível de experiência, evolução por patentes e ferimentos debilitantes: os toggles de mesa existem, mas as regras detalhadas e seus efeitos ficam para a fase do painel/configurações.
 - Dados da comunidade e conteúdo personalizado: nada foi importado; serão incluídos somente por criação própria do mestre.
 
+## Progressão por NEX (Fase 4)
+
+- No modo padrão, o mestre pode avançar fichas de Combatente, Especialista e Ocultista para um NEX maior entre 5% e 99%. O jogador só pode fazê-lo quando `jogador_pode_subir_nex` está habilitado.
+- O NEX, a versão da ficha, o registro de auditoria e as escolhas pendentes dos marcos são atualizados na mesma transação. Os máximos de recursos são derivados dos cálculos já existentes após o avanço.
+- A tela exibe pendências de trilha, poderes, aumento de atributo, treinamento e rituais geradas pela função de progressão; a resolução dessas escolhas ainda não está incluída.
+- Sobrevivente (progressão por estágio), nível de experiência e evolução por patentes permanecem fora deste fluxo. O formulário só aparece quando há próximo NEX disponível e o sistema da mesa está em modo NEX.
+
 ## Limitações de extração
 
 O extrator cria um TXT por página física do PDF. Para o miolo do OPRPG, as amostras confirmam que a página impressa equivale à página PDF menos 10; o campo `fonte` usa a página impressa. Para SaH, as páginas impressas foram conferidas individualmente e não se aplica o deslocamento do livro básico.

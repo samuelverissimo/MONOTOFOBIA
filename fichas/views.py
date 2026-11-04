@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import F
-from django.http import JsonResponse
+from django.http import HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
@@ -12,6 +12,7 @@ from django_ratelimit.decorators import ratelimit
 
 from .forms import (
     AtributosFichaForm,
+    AvancoNexForm,
     ClasseFichaForm,
     ConceitoFichaForm,
     FichaEdicaoForm,
@@ -29,19 +30,21 @@ from .models import (
     LogAlteracao,
     Origem,
     Pericia,
+    Pendencia,
     Rolagem,
 )
 from .permissions import fichas_visiveis_para, is_mestre
 from .regras import (
     ATRIBUTOS,
+    NEX_VALIDOS,
     bonus_pericia,
     calcular_pd_max,
     calcular_pe_max,
     calcular_pv_max,
     calcular_san_max,
+    pendencias_ao_subir_nex,
     rolar_teste,
 )
-
 
 SESSAO_WIZARD = 'fichas.criacao'
 ETAPAS = ('conceito', 'atributos', 'origem', 'classe', 'pericias', 'revisao')
@@ -409,9 +412,7 @@ def criar_ficha(request, etapa):
     })
 
 
-@login_required
-def detalhe_ficha(request, pk):
-    ficha = get_object_or_404(fichas_visiveis_para(request.user), pk=pk)
+def _contexto_detalhe(request, ficha, formulario_avanco=None):
     ativas = ficha.condicoes.select_related('condicao').order_by('condicao__nome')
     ids_condicoes_ativas = ativas.values_list('condicao_id', flat=True)
     classe = ficha.classe.slug if ficha.classe_id else None
@@ -424,16 +425,115 @@ def detalhe_ficha(request, pk):
             san=calcular_san_max(classe, **argumentos, ajuste=ficha.ajuste_san_max),
             pd=calcular_pd_max(classe, ficha.presenca, **argumentos, ajuste=ficha.ajuste_pd_max),
         )
-    return render(request, 'fichas/detalhe.html', {
+    mesa = ConfiguracaoMesa.objects.filter(pk=1).first() or ConfiguracaoMesa()
+    pode_avancar = bool(
+        classe and classe != 'sobrevivente' and ficha.nex is not None
+        and any(nex > ficha.nex for nex in NEX_VALIDOS)
+        and mesa.sistema_progressao == 'nex'
+        and (is_mestre(request.user) or (
+            ficha.dono_id == request.user.pk and mesa.jogador_pode_subir_nex
+        ))
+    )
+    if formulario_avanco is None and pode_avancar:
+        proximo_nex = next((nex for nex in NEX_VALIDOS if nex > ficha.nex), '')
+        formulario_avanco = AvancoNexForm(
+            nex_atual=ficha.nex,
+            initial={'nex_novo': proximo_nex, 'versao': ficha.versao},
+        )
+    return {
         'ficha': ficha,
         'ficha_pericias': ficha.pericias.select_related('pericia').order_by('pericia__nome'),
         'condicoes_ativas': ativas,
         'condicoes_disponiveis': Condicao.objects.exclude(pk__in=ids_condicoes_ativas).order_by('nome'),
         'atributos': ATRIBUTOS,
         'maximos': maximos,
-        'modo_recursos': ConfiguracaoMesa.objects.filter(pk=1).values_list('modo_recursos', flat=True).first() or 'padrao',
+        'modo_recursos': mesa.modo_recursos,
+        'pendencias': ficha.pendencias.filter(resolvida=False).order_by('criada_em', 'pk'),
+        'pode_avancar_nex': pode_avancar,
+        'formulario_avanco': formulario_avanco,
         'mestre': is_mestre(request.user),
-    })
+    }
+
+
+@login_required
+def detalhe_ficha(request, pk):
+    ficha = get_object_or_404(fichas_visiveis_para(request.user), pk=pk)
+    return render(request, 'fichas/detalhe.html', _contexto_detalhe(request, ficha))
+
+
+@login_required
+@require_POST
+def avancar_nex(request, pk):
+    ficha = get_object_or_404(fichas_visiveis_para(request.user), pk=pk)
+    mesa = ConfiguracaoMesa.objects.filter(pk=1).first() or ConfiguracaoMesa()
+    autorizado = is_mestre(request.user) or (
+        ficha.dono_id == request.user.pk and mesa.jogador_pode_subir_nex
+    )
+    if not autorizado:
+        return HttpResponseForbidden('Somente o mestre pode avançar o NEX nesta mesa.')
+    if (
+        not ficha.classe_id or ficha.classe.slug == 'sobrevivente' or ficha.nex is None
+        or mesa.sistema_progressao != 'nex'
+        or ficha.classe.slug not in ('combatente', 'especialista', 'ocultista')
+    ):
+        messages.error(request, 'Esta ficha não usa progressão padrão por NEX.')
+        return redirect('fichas:detalhe', pk=pk)
+
+    form = AvancoNexForm(request.POST, nex_atual=ficha.nex)
+    if not form.is_valid():
+        return render(request, 'fichas/detalhe.html', _contexto_detalhe(request, ficha, form), status=400)
+    nex_novo = int(form.cleaned_data['nex_novo'])
+    versao = form.cleaned_data['versao']
+
+    with transaction.atomic():
+        atual = Ficha.objects.select_for_update().filter(pk=pk).first()
+        if atual is None:
+            return render(request, '404.html', status=404)
+        mesa_atual = ConfiguracaoMesa.objects.filter(pk=1).first() or ConfiguracaoMesa()
+        autorizado_atual = is_mestre(request.user) or (
+            atual.dono_id == request.user.pk and mesa_atual.jogador_pode_subir_nex
+        )
+        if not autorizado_atual:
+            return HttpResponseForbidden('Somente o mestre pode avançar o NEX nesta mesa.')
+        if mesa_atual.sistema_progressao != 'nex':
+            messages.error(request, 'A mesa não está usando progressão padrão por NEX.')
+            return redirect('fichas:detalhe', pk=pk)
+        if atual.versao != versao or atual.nex != ficha.nex:
+            form.add_error(None, 'A ficha mudou em outra sessão. Recarregue antes de avançar.')
+            return render(request, 'fichas/detalhe.html', _contexto_detalhe(request, atual, form), status=409)
+        if atual.classe_id is None or atual.classe.slug not in ('combatente', 'especialista', 'ocultista'):
+            messages.error(request, 'Esta ficha não usa progressão padrão por NEX.')
+            return redirect('fichas:detalhe', pk=pk)
+        try:
+            pendencias = pendencias_ao_subir_nex(
+                atual.classe.slug, atual.nex, nex_novo, intelecto=atual.intelecto
+            )
+        except ValueError as erro:
+            form.add_error('nex_novo', str(erro))
+            return render(request, 'fichas/detalhe.html', _contexto_detalhe(request, atual, form), status=400)
+
+        agora = timezone.now()
+        atualizados = Ficha.objects.filter(pk=pk, versao=versao, nex=ficha.nex).update(
+            nex=nex_novo, versao=F('versao') + 1, atualizada_em=agora,
+        )
+        if not atualizados:
+            form.add_error(None, 'A ficha mudou em outra sessão. Recarregue antes de avançar.')
+            return render(request, 'fichas/detalhe.html', _contexto_detalhe(request, atual, form), status=409)
+        Pendencia.objects.bulk_create([
+            Pendencia(
+                ficha=atual,
+                tipo=pendencia['tipo'],
+                descricao=pendencia['descricao'],
+                fonte=pendencia['fonte'],
+            )
+            for pendencia in pendencias
+        ])
+        LogAlteracao.objects.create(
+            ficha=atual, usuario=request.user, e_mestre=is_mestre(request.user),
+            campo='nex', valor_antigo=str(ficha.nex), valor_novo=str(nex_novo),
+        )
+    messages.success(request, f'NEX avançado para {nex_novo}%. Escolhas pendentes foram registradas.')
+    return redirect('fichas:detalhe', pk=pk)
 
 
 @login_required

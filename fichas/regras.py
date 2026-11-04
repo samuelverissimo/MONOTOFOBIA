@@ -201,6 +201,8 @@ def rolar_dano(quantidade_dados, faces, bonus=0, multiplicador_critico=1, rng=No
 def pendencias_ao_subir_nex(classe, nex_anterior, nex_novo, intelecto=0):
     """Lista escolhas pendentes por marcos de NEX. OPRPG pp. 25, 29 e 33."""
     classe = _classe(classe)
+    if classe == 'sobrevivente':
+        raise ValueError('Sobreviventes avançam por estágio, não por NEX.')
     if nex_anterior not in NEX_VALIDOS or nex_novo not in NEX_VALIDOS or nex_novo <= nex_anterior:
         raise ValueError('A progressão deve avançar entre NEX válidos.')
     _validar_atributo(intelecto)

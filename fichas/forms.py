@@ -2,7 +2,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 
 from fichas.models import Classe, Origem, Pericia
-from fichas.regras import ATRIBUTOS, pericias_treinadas_disponiveis, validar_atributos_iniciais
+from fichas.regras import ATRIBUTOS, NEX_VALIDOS, pericias_treinadas_disponiveis, validar_atributos_iniciais
 
 
 class ConceitoFichaForm(forms.Form):
@@ -176,3 +176,14 @@ class FichaEdicaoForm(forms.Form):
         super().__init__(*args, **kwargs)
         if not mestre:
             self.fields.pop('anotacoes_mestre')
+
+
+class AvancoNexForm(forms.Form):
+    nex_novo = forms.ChoiceField(label='Novo NEX')
+    versao = forms.IntegerField(widget=forms.HiddenInput)
+
+    def __init__(self, *args, nex_atual, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['nex_novo'].choices = [
+            (nex, f'{nex}%') for nex in NEX_VALIDOS if nex > nex_atual
+        ]

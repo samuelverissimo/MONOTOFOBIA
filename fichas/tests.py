@@ -17,6 +17,7 @@ from fichas.models import (
     Origem,
     Patente,
     Pericia,
+    Pendencia,
     Rolagem,
 )
 from fichas.permissions import fichas_visiveis_para, is_mestre, pode_editar_ficha, pode_ver_ficha
@@ -84,6 +85,8 @@ class RegrasTests(SimpleTestCase):
         self.assertEqual(limite_pe_por_turno(99, classe='sobrevivente'), 1)
         pendencias = pendencias_ao_subir_nex('especialista', 5, 20, intelecto=3)
         self.assertEqual([item['tipo'] for item in pendencias], ['trilha', 'poder', 'atributo'])
+        with self.assertRaises(ValueError):
+            pendencias_ao_subir_nex('sobrevivente', 5, 10)
 
     def test_rolls_follow_attribute_zero_and_negative_pool_rules(self):
         zero = rolar_teste(0, rng=FixedDice([19, 3]))
@@ -317,6 +320,84 @@ class FichaViewsTests(TestCase):
             data='{"recurso":"pv","delta":1}', content_type='application/json',
         )
         self.assertEqual(response.status_code, 403)
+
+
+class ProgressaoNexViewsTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(username='progress-owner', password=get_random_string(32))
+        self.master = User.objects.create_superuser(
+            username='progress-master', email='progress-master@example.com', password=get_random_string(32)
+        )
+        self.classe = Classe.objects.create(
+            nome='Combatente', slug='combatente', fonte='OPRPG', resumo='',
+        )
+        self.ficha = Ficha.objects.create(dono=self.owner, nome='Agente', classe=self.classe, nex=5)
+
+    def test_only_master_can_advance_when_player_option_is_disabled(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(reverse('fichas:avancar_nex', kwargs={'pk': self.ficha.pk}), {
+            'nex_novo': '20', 'versao': '1',
+        })
+        self.assertEqual(response.status_code, 403)
+        self.ficha.refresh_from_db()
+        self.assertEqual(self.ficha.nex, 5)
+        self.assertFalse(Pendencia.objects.filter(ficha=self.ficha).exists())
+
+    def test_master_advancement_updates_version_audit_and_milestone_choices_atomically(self):
+        self.client.force_login(self.master)
+        response = self.client.post(reverse('fichas:avancar_nex', kwargs={'pk': self.ficha.pk}), {
+            'nex_novo': '20', 'versao': '1',
+        })
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.ficha.refresh_from_db()
+        self.assertEqual((self.ficha.nex, self.ficha.versao), (20, 2))
+        self.assertEqual(
+            list(self.ficha.pendencias.values_list('tipo', flat=True)),
+            ['trilha', 'poder', 'atributo'],
+        )
+        self.assertTrue(LogAlteracao.objects.filter(ficha=self.ficha, campo='nex', valor_novo='20').exists())
+
+        response = self.client.post(reverse('fichas:avancar_nex', kwargs={'pk': self.ficha.pk}), {
+            'nex_novo': '25', 'versao': '1',
+        })
+        self.assertEqual(response.status_code, 409)
+        self.ficha.refresh_from_db()
+        self.assertEqual(self.ficha.nex, 20)
+
+    def test_player_can_advance_only_when_table_allows_it(self):
+        ConfiguracaoMesa.objects.create(jogador_pode_subir_nex=True)
+        self.client.force_login(self.owner)
+        response = self.client.post(reverse('fichas:avancar_nex', kwargs={'pk': self.ficha.pk}), {
+            'nex_novo': '10', 'versao': '1',
+        })
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.ficha.refresh_from_db()
+        self.assertEqual(self.ficha.nex, 10)
+        self.assertEqual(list(self.ficha.pendencias.values_list('tipo', flat=True)), ['trilha'])
+
+    def test_survivor_cannot_use_nex_advancement(self):
+        sobrevivente = Classe.objects.create(
+            nome='Sobrevivente', slug='sobrevivente', fonte='SaH', resumo='',
+        )
+        ficha = Ficha.objects.create(
+            dono=self.owner, nome='Sobrevivente', classe=sobrevivente, nex=None, estagio=1,
+        )
+        self.client.force_login(self.master)
+        response = self.client.post(reverse('fichas:avancar_nex', kwargs={'pk': ficha.pk}), {
+            'nex_novo': '10', 'versao': '1',
+        })
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': ficha.pk}))
+        ficha.refresh_from_db()
+        self.assertIsNone(ficha.nex)
+        self.assertEqual(ficha.estagio, 1)
+
+    def test_nex_maximum_hides_advancement_form(self):
+        self.ficha.nex = 99
+        self.ficha.save(update_fields=('nex',))
+        self.client.force_login(self.master)
+        response = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Avançar NEX')
 
 
 class MesaAndMasterCommandTests(TestCase):

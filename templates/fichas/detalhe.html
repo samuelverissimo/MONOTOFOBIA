@@ -21,6 +21,7 @@
         <section id="status">
             <h2>Status</h2>
             <p>{{ ficha.classe|default:'Sem classe' }} · {{ ficha.get_status_display }}</p>
+            {% if ficha.nex %}<p>NEX {{ ficha.nex }}%</p>{% endif %}
             <form hidden>{% csrf_token %}</form>
             <div class="resource-grid" aria-label="Recursos">
                 <section class="resource" data-resource-panel="pv">
@@ -57,6 +58,26 @@
                 <dt>Vigor</dt><dd>{{ ficha.vigor }}</dd>
             </dl>
         </section>
+        {% if pendencias %}
+            <section aria-labelledby="pending-heading">
+                <h2 id="pending-heading">Escolhas pendentes</h2>
+                <ul>
+                    {% for pendencia in pendencias %}
+                        <li>{{ pendencia.descricao }} <span class="muted">{{ pendencia.fonte }}</span></li>
+                    {% endfor %}
+                </ul>
+            </section>
+        {% endif %}
+        {% if pode_avancar_nex %}
+            <section aria-labelledby="progression-heading">
+                <h2 id="progression-heading">Progressão</h2>
+                <form method="post" action="{% url 'fichas:avancar_nex' ficha.pk %}">
+                    {% csrf_token %}
+                    {{ formulario_avanco.as_p }}
+                    <button class="button" type="submit">Avançar NEX</button>
+                </form>
+            </section>
+        {% endif %}
         <section id="pericias">
             <h2>Perícias</h2>
             <ul>
