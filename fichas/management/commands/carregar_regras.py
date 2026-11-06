@@ -108,7 +108,8 @@ class Command(BaseCommand):
 
         for arquivo, modelo, campos in (
             ('poderes.json', Poder, {
-                'nome', 'fonte', 'personalizado', 'resumo', 'tipo', 'pre_requisitos', 'custo',
+                'nome', 'fonte', 'personalizado', 'resumo', 'tipo', 'elemento',
+                'afinidade_resumo', 'repetivel', 'pre_requisitos', 'custo',
             }),
             ('rituais.json', Ritual, {
                 'nome', 'fonte', 'personalizado', 'resumo', 'circulo', 'elemento',
@@ -135,6 +136,12 @@ class Command(BaseCommand):
                         raise CommandError(
                             f"Pré-requisitos inválidos para o registro {registro['slug']}."
                         ) from erro
+                if modelo is Poder:
+                    elemento = registro.get('elemento', '')
+                    if elemento and elemento not in dict(Poder.ELEMENTOS):
+                        raise CommandError(
+                            f"Elemento inválido para o poder {registro['slug']}."
+                        )
                 _, criado = self._atualizar(modelo, registro, campos=campos)
                 contagens['criados' if criado else 'atualizados'] += 1
 

@@ -11,11 +11,17 @@ def explicar_teste(
     atributo_slug=None,
     pericia_slug=None,
     dados_extras=0,
+    dados_pericia_extra=0,
     bonus_pericia=0,
+    bonus_pericia_extra=0,
+    bonus_pericia_contextual=0,
     bonus=0,
 ):
     """Calcula a pool e detalha a contribuição de cada condição e bônus."""
-    if any(type(valor) is not int for valor in (dados_extras, bonus_pericia, bonus)):
+    if any(type(valor) is not int for valor in (
+        dados_extras, dados_pericia_extra, bonus_pericia, bonus_pericia_extra,
+        bonus_pericia_contextual, bonus,
+    )):
         raise ValueError('Modificadores do teste devem ser inteiros.')
 
     extras_condicoes = 0
@@ -35,7 +41,10 @@ def explicar_teste(
             sinal = '+' if extras > 0 else '−'
             linhas.append(f'{sinal}{abs(extras)} {condicao.nome}')
 
-    dados_totais = dados_extras + extras_condicoes
+    dados_totais = dados_extras + dados_pericia_extra + extras_condicoes
+    if dados_pericia_extra:
+        sinal = '+' if dados_pericia_extra > 0 else '−'
+        linhas.append(f'{sinal}{abs(dados_pericia_extra)} dados adicionais da perícia')
     if dados_extras:
         sinal = '+' if dados_extras > 0 else '−'
         modificador = 'modificador' if abs(dados_extras) == 1 else 'modificadores'
@@ -45,6 +54,12 @@ def explicar_teste(
     if bonus_pericia:
         sinal = '+' if bonus_pericia > 0 else '−'
         linhas.append(f'{sinal}{abs(bonus_pericia)} treinamento')
+    if bonus_pericia_extra:
+        sinal = '+' if bonus_pericia_extra > 0 else '−'
+        linhas.append(f'{sinal}{abs(bonus_pericia_extra)} modificador da perícia')
+    if bonus_pericia_contextual:
+        sinal = '+' if bonus_pericia_contextual > 0 else '−'
+        linhas.append(f'{sinal}{abs(bonus_pericia_contextual)} modificador contextual da perícia')
     if bonus:
         sinal = '+' if bonus > 0 else '−'
         linhas.append(f'{sinal}{abs(bonus)} bônus situacional')
@@ -57,6 +72,8 @@ def explicar_teste(
         'dados_extras': dados_totais,
         'quantidade_dados': quantidade,
         'ordem': 'menor' if escolher_menor else 'maior',
-        'bonus_total': bonus_pericia + bonus,
+        'bonus_total': (
+            bonus_pericia + bonus_pericia_extra + bonus_pericia_contextual + bonus
+        ),
         'detalhamento': linhas,
     }

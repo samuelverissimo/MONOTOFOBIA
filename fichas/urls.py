@@ -6,6 +6,7 @@ app_name = 'fichas'
 
 urlpatterns = [
     path('mesa/configurar/', views.configurar_mesa, name='configurar_mesa'),
+    path('<int:pk>/configuracao/', views.configurar_ficha, name='configurar_ficha'),
     path('mesa/combates/', views.gerenciar_encontros, name='encontros_combate'),
     path('mesa/combates/<int:pk>/', views.encontro_combate, name='encontro_combate'),
     path('mesa/combates/<int:pk>/participantes/', views.adicionar_participante_combate, name='adicionar_participante_combate'),
@@ -36,8 +37,25 @@ urlpatterns = [
     path('<int:pk>/inventario/<int:item_pk>/atualizar/', views.atualizar_item, name='atualizar_item'),
     path('<int:pk>/inventario/<int:item_pk>/remover/', views.remover_item, name='remover_item'),
     path('<int:pk>/status/', views.alterar_status_ficha, name='status'),
+    path('<int:pk>/anotacoes/', views.salvar_anotacoes, name='salvar_anotacoes'),
     path('<int:pk>/excluir/', views.excluir_ficha, name='excluir'),
     path('<int:pk>/habilidades/adicionar/', views.adicionar_habilidade, name='adicionar_habilidade'),
+    path(
+        '<int:pk>/habilidades/<int:habilidade_pk>/editar/',
+        views.editar_habilidade,
+        name='editar_habilidade',
+    ),
+    path(
+        '<int:pk>/pericias/<int:pericia_pk>/ajustar/',
+        views.ajustar_pericia,
+        name='ajustar_pericia',
+    ),
+    path('<int:pk>/poderes/adicionar/', views.gerenciar_poder_ficha, name='adicionar_poder_ficha'),
+    path('<int:pk>/poderes/<int:poder_pk>/editar/', views.gerenciar_poder_ficha, name='editar_poder_ficha'),
+    path('<int:pk>/poderes/<int:poder_pk>/remover/', views.remover_poder_ficha, name='remover_poder_ficha'),
+    path('<int:pk>/rituais/adicionar/', views.gerenciar_ritual_ficha, name='adicionar_ritual_ficha'),
+    path('<int:pk>/rituais/<int:ritual_pk>/editar/', views.gerenciar_ritual_ficha, name='editar_ritual_ficha'),
+    path('<int:pk>/rituais/<int:ritual_pk>/remover/', views.remover_ritual_ficha, name='remover_ritual_ficha'),
     path(
         '<int:pk>/habilidades/<int:habilidade_pk>/remover/',
         views.remover_habilidade,

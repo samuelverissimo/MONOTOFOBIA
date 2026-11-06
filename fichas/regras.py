@@ -59,6 +59,13 @@ def nex_equivalente_por_nivel(nivel):
     return 99 if nivel == 20 else nivel * 5
 
 
+def nivel_equivalente_por_nex(nex):
+    """Converte os marcos de NEX em níveis de experiência. SaH p. 98."""
+    if isinstance(nex, bool) or not isinstance(nex, int) or nex not in NEX_VALIDOS:
+        raise ValueError('NEX deve ser 5%, 10% ... 95% ou 99%.')
+    return 20 if nex == 99 else nex // 5
+
+
 def calcular_pv_max(classe, vigor, nex=5, estagio=1, ajuste=0):
     """PV inicial e incrementos. OPRPG pp. 25, 29, 33; SaH p. 30."""
     classe = _classe(classe)
@@ -357,20 +364,15 @@ def pendencias_ao_subir_estagio(estagio_anterior, estagio_novo):
     pendencias = []
     for estagio in range(estagio_anterior + 1, estagio_novo + 1):
         if estagio == 2:
-            pendencias.extend((
-                {'tipo': 'trilha', 'descricao': 'Escolher uma trilha de Sobrevivente.', 'fonte': 'SaH p.31'},
-                {'tipo': 'poder', 'descricao': 'Registrar a primeira habilidade da trilha.', 'fonte': 'SaH p.31'},
-            ))
+            pendencias.append({
+                'tipo': 'trilha',
+                'descricao': 'Escolher uma trilha de Sobrevivente.',
+                'fonte': 'SaH p.31',
+            })
         elif estagio == 3:
             pendencias.append({
                 'tipo': 'atributo',
                 'descricao': 'Aumentar um atributo em +1 (máximo 3).',
-                'fonte': 'SaH p.31',
-            })
-        elif estagio == 4:
-            pendencias.append({
-                'tipo': 'poder',
-                'descricao': 'Registrar a segunda habilidade da trilha.',
                 'fonte': 'SaH p.31',
             })
         elif estagio == 5:

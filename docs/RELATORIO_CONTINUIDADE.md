@@ -31,11 +31,11 @@ Atualizado em 2026-11-04. Este documento resume o estado conhecido do projeto pa
 | Fase | Status | Já feito no sistema | Ainda falta |
 |---|---|---|---|
 | 0 — Correções e fundações | ✅ | Autenticação/permissões, base de fichas, rolagens físicas/digitais, recursos auditados, verificações de migração e correções de fluxo. | Revalidações contínuas de segurança e produção estão na Fase 12. |
-| 1 — Catálogos de regras | 🟡 | Atributos, perícias, classes/progressões, condições, patentes e origens carregados; carregador idempotente; schema cumulativo e validação de pré-requisitos; validação dos efeitos das condições. | `trilhas.json`, `poderes.json`, `rituais.json`, `itens_oprgp.json` e `itens_sah.json` estão vazios. Faltam curadoria autorizada, validação dos dados e conferência visual das páginas-imagem marcadas “a conferir”. |
+| 1 — Catálogos de regras | 🟡 | Atributos, perícias, classes/progressões, condições, patentes, origens, poderes e trilhas carregados; loader idempotente e pré-requisitos estruturados/validados. | Catálogos de rituais e itens vazios; conferir páginas-imagem marcadas “a conferir” e ampliar validação de dados. |
 | 2 — Motor de condições e efeitos | 🟡 | Modificadores numéricos em testes/Defesa, escaladas e auditoria; expiração no fim da cena; duração opcional de 1–99 turnos por ficha; bloqueios diretos para Atordoado/Pasmo, Enjoado e Inconsciente. | Resolver efeitos que dependem de contexto (ações mentais, alvos, deslocamento, percepção, início/fim de rodada), composição/interações e durações específicas do catálogo ainda não automatizadas. |
 | 3 — Modo Presencial | ✅ | Fluxos físicos para rolagens/iniciativa/dano, modo de sessão com contraste/fonte e tentativa de Screen Wake Lock; combate assistido presencialmente. | Testar usabilidade e compatibilidade em aparelhos reais. Não é um tabuleiro virtual. |
 | 4 — Painel do mestre e turnos | ✅ | Painel unificado para mesas, fichas inscritas, cenas/pistas, histórico filtrado de rolagens e configuração; cards e polling, condição em grupo e rastreador com participantes, ordem, ações, reações e gastos PE/PD por turno. Jogadores encontram mesas separadamente. | Automatizações de combate descritas nas Fases 2 e 5 permanecem fora deste painel básico. |
-| 5 — Poderes, rituais e combate/paranormal | 🟡 | Ficha registra escolhas personalizadas ou de catálogo; pré-requisitos estruturados filtram e revalidam escolhas. Teste de ataque, dano físico informado e aplicação auditada a fichas estão disponíveis. | Catálogos ainda vazios; faltam execução/custo/efeitos automáticos de poderes e rituais, combate completo, reações e resolução paranormal automatizada. |
+| 5 — Poderes, rituais e combate/paranormal | 🟡 | Catálogo de poderes e trilhas preenchido; pré-requisitos estruturados filtram e revalidam escolhas. Teste de ataque, dano físico informado e aplicação auditada a fichas estão disponíveis. | Catálogo de rituais vazio; faltam efeitos automáticos de poderes/rituais, combate completo, reações e resolução paranormal automatizada. |
 | 6 — Evolução e campanha | 🟡 | NEX, níveis, estágios, patentes/prestígio, escolhas pendentes, configuração global adaptável após criação de fichas, sessão, arquivamento e histórico/auditoria. Ficha informa patente, prestígio, deslocamento e mesas associadas. | Ainda não há gestão completa de campanhas/projetos separados; catálogos impedem algumas escolhas padrão, e gatilhos de dano massivo/recuperação contextual seguem manuais. |
 | 7 — Equipamento | 🟡 | Inventário manual, espaços/carga, estado de itens, penalidades de sobrecarga e escolha de kit. Modelos aceitam dados de catálogo. | Catálogos de armas, proteções, equipamentos e itens amaldiçoados estão vazios; falta aplicar automaticamente propriedades e efeitos de equipamento. |
 | 8 — Cenas | ✅ | Cenas com estado público/oculto, descrição para jogadores/notas privadas, pistas reveláveis e operações do mestre auditadas. | Recursos narrativos além do fluxo de cenas/pistas ainda entram nas fases 9 e 10. |
@@ -202,3 +202,43 @@ O relatório foi comparado com as views, modelos, templates, JSONs e testes atua
 - A criação da ficha valida os pré-requisitos estruturados da trilha e limita avanços de grau de perícia conforme os marcos de NEX e classe; Sobreviventes não recebem avanços automáticos de grau na criação.
 - Documentação e testes relacionados foram atualizados. A verificação completa mais recente executou 130 testes com sucesso; `check`, migrações e diff-check também passaram.
 - Ainda falta validar visualmente em dispositivos reais. Catálogos de habilidades/equipamentos não foram preenchidos com conteúdo de livros; continuar essa curadoria somente com conteúdo autorizado. Combate permanece assistido, com danos informados pelo mestre.
+
+## Handoff parcial — 2026-11-05
+
+Esta seção supersede qualquer estado anterior descrito acima para a continuação do catálogo. O usuário pediu para pausar a implementação por limite de créditos e retomar em outra máquina. Não houve commit nem push; as alterações abaixo existem somente no workspace local, na branch `main`.
+
+### Estado confirmado
+
+- Implementada configuração individual para fichas sem mesa: modelo `ConfiguracaoFicha`, formulário e POST em `fichas/<id>/configuracao/`. A ficha pode escolher modo de recursos, progressão, Ferimentos Debilitantes, permissão para o dono avançar e número de sessão. Evolução por patentes exige Sem Sanidade; Sobrevivente não pode usar patentes.
+- Precedência: ficha ligada a uma ou mais mesas usa a configuração global; ficha sem vínculo usa sua configuração individual. Alterar a configuração individual de ficha ligada retorna 403. A inscrição exige compatibilidade entre modo de recursos, progressão e regra de Ferimentos Debilitantes. Ao remover o último vínculo, os padrões individuais são sincronizados com a configuração global vigente.
+- A configuração efetiva já é consultada nos cálculos e fluxos de recursos, polling, ferimentos, evolução, Cicatrizado e gastos de PE/PD no combate. A configuração global continua controlando limites de fichas e compartilhamento.
+- `fichas/migrations/0017_configuracao_ficha.py` cria o modelo e copia os valores globais atuais para cada ficha existente. `fichas/migrations/0018_poder_elemento.py` adiciona o elemento ao modelo `Poder` para permitir catalogar poderes paranormais por elemento.
+- O campo `Poder.elemento` existe e sua migration foi gerada, mas ainda não foram adicionados à validação de pré-requisitos os requisitos de quantidade por elemento/afinidade, nem a leitura/validação desse campo no comando `carregar_regras`.
+- Os JSONs `trilhas.json`, `poderes.json`, `rituais.json`, `itens_oprgp.json` e `itens_sah.json` continuam vazios. As origens e seus poderes já estão nos JSONs existentes e não devem ser duplicados como poderes avulsos. O catálogo de itens não foi iniciado neste incremento.
+- O usuário confirmou que a licença comunitária do criador autoriza a curadoria desses dados. Mantenha atribuição de fonte/página e resumos mecânicos concisos; não copie descrições longas.
+
+### Estado do banco e validação
+
+- O workspace contém alterações não commitadas em `core/views.py`, `docs/RELATORIO_CONTINUIDADE.md`, `fichas/forms.py`, `fichas/models.py`, `fichas/tests.py`, `fichas/urls.py`, `fichas/views.py`, `templates/fichas/detalhe.html` e `templates/fichas/encontro_combate.html`, além das migrations não rastreadas `0017_configuracao_ficha.py` e `0018_poder_elemento.py`.
+- `showmigrations fichas` confirmou que o banco desta máquina está na migration `0016`; `0017` e `0018` ainda não foram aplicadas.
+- Passaram 24 testes focados de configuração global, progressão NEX/nível/patentes e inscrição em mesa. Também passaram 12 testes focados de formulário e configuração por ficha, proteção de ficha vinculada, configuração global e inscrição.
+- Depois de gerar `0018`, os mesmos 12 testes focados foram repetidos com sucesso; o banco temporário de testes aplicou `0017` e `0018`. Ainda não foi executada a suíte completa após estas mudanças, nem `check`, Bandit, pip-audit ou a validação visual.
+- Após gerar `0018`, `python manage.py makemigrations --check --dry-run` retornou `No changes detected`; `git diff --check` não reportou erros (Git apenas avisou sobre normalização CRLF/LF). Reexecute a checagem depois de continuar o catálogo.
+
+### Como retomar
+
+1. Transfira o workspace completo, incluindo alterações não commitadas. Um clone ou `git pull` sozinho não contém este trabalho.
+2. PDFs e textos extraídos em `docs/regras/texto/` são ignorados pelo Git. Transfira-os por meio autorizado/privado se forem necessários na nova máquina; não os adicione ao Git. Não transfira `.env` ou segredos junto com o código.
+3. Prepare o ambiente conforme `README.md`, configure um `.env` novo e execute `python manage.py migrate` para aplicar `fichas.0017` e `fichas.0018`.
+4. As checagens de migration e os testes focados já passaram nesta máquina; repita-os após transportar o workspace e aplicar as migrations. Depois dos ajustes do catálogo, execute `python manage.py test` e `python manage.py check`.
+5. Continue estendendo `fichas/pre_requisitos.py` para requisitos elementais/afinidade; atualize `Poder`/`carregar_regras.py` e testes antes de preencher `poderes.json`.
+6. Preencha `poderes.json` e `trilhas.json` com todas as entradas da lista aprovada na sessão anterior, mantendo cada habilidade de trilha ligada à classe/trilha e aos marcos de progressão. Preserve `classes.json` como fonte das habilidades base de classe e as origens existentes sem duplicação.
+7. Carregue e valide com `python manage.py carregar_regras`. Itens/armas/proteções pertencem à etapa de catálogo seguinte, separada desta lista de habilidades.
+
+## Atualização — catálogo de habilidades, 2026-11-05
+
+- Continuação concluída a partir da lista aprovada na sessão anterior e do inventário fornecido pelo proprietário. `poderes.json` agora tem 143 registros: 72 de classe (incluindo opções compartilhadas registradas uma vez), 38 gerais e 33 paranormais. “Resistir a Elemento” está representado como quatro escolhas elementais. Poderes de origem continuam exclusivamente nos catálogos de origem.
+- `trilhas.json` agora contém 27 trilhas e 102 habilidades de progressão: 15 trilhas do OPRPG, nove de SaH e três trilhas de Sobrevivente. A ficha exibe os marcos e resumos; os efeitos permanecem informativos, não automatizados.
+- Antes da carga, foram implementados requisitos mínimos por elemento, perícias alternativas, estado de afinidade, resumo de benefício por afinidade e repetibilidade controlada. A afinidade é registrada manualmente na ficha a partir de NEX equivalente a 50%; escolher um poder paranormal pela segunda vez exige afinidade correspondente, salvo poderes marcados repetíveis.
+- Migrations novas: `fichas.0019_ficha_afinidade_elemento` e `fichas.0020_poder_afinidade_resumo_poder_repetivel`. Migrations `0017`–`0020` foram aplicadas ao SQLite local.
+- As páginas extraídas localmente foram usadas para referências e resumos curtos. Itens e rituais não foram incluídos nesta etapa; catálogos de equipamentos continuam vazios.

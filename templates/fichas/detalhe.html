@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ ficha.nome }} | MONOTOFOBIA{% endblock %}
 
@@ -11,26 +12,6 @@
         </nav>
     </header>
     <main class="sheet-layout" data-sheet-theme="{{ ficha.classe.slug|default:'arquivo' }}">
-        <svg class="die-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <symbol id="die-d4" viewBox="0 0 100 100">
-                <path d="M50 6 95 90H5Z M50 6v55 M5 90l45-29 45 29"/>
-            </symbol>
-            <symbol id="die-d6" viewBox="0 0 100 100">
-                <path d="m50 5 42 23v44L50 95 8 72V28Z M50 5v45 M8 28l42 22 42-22 M50 50v45"/>
-            </symbol>
-            <symbol id="die-d8" viewBox="0 0 100 100">
-                <path d="M50 4 95 50 50 96 5 50Z M5 50h90 M50 4v92"/>
-            </symbol>
-            <symbol id="die-d10" viewBox="0 0 100 100">
-                <path d="M50 4 89 39 50 96 11 39Z M11 39h78 M50 4v35 M50 39v57 M11 39l39 25 39-25"/>
-            </symbol>
-            <symbol id="die-d12" viewBox="0 0 100 100">
-                <path d="m50 4 39 28-15 46H26L11 32Z M50 25l23 17-9 27H36l-9-27Z M50 4v21 M89 32 73 42 M74 78 64 69 M26 78l10-9 M11 32l16 10"/>
-            </symbol>
-            <symbol id="die-d20" viewBox="0 0 100 100">
-                <path d="m50 3 34 12 14 30-12 32-36 20-36-20L2 45l14-30Z M50 3v19 M84 15 75 37 M98 45 75 37 M86 77 70 67 M50 97V79 M14 77l16-10 M2 45l23-8 M16 15l9 22 M50 22l25 15-5 30-20 12-20-12-5-30Z M50 22 50 50 75 37 M75 37 70 67 50 50 M70 67 50 79 50 50 M50 79 30 67 50 50 M30 67 25 37 50 50 M25 37 50 22 50 50"/>
-            </symbol>
-        </svg>
         <header class="sheet-hero">
             <div class="sheet-identity">
                 <p class="eyebrow">Arquivo de agente · {{ ficha.get_status_display }}</p>
@@ -40,24 +21,28 @@
                     <span>{{ ficha.classe|default:'Classe não definida' }}</span>
                     {% if ficha.trilha %}<span>{{ ficha.trilha.nome }}</span>
                     {% elif ficha.trilha_nome_personalizado %}<span>{{ ficha.trilha_nome_personalizado }}</span>{% endif %}
-                    {% if ficha.nex is not None %}<span>NEX {{ ficha.nex }}%</span>{% endif %}
+                    {% if sistema_progressao == 'nivel_nex' and ficha.classe_id and ficha.classe.slug != 'sobrevivente' and ficha.nivel_experiencia is not None %}
+                        <span>Nível {{ ficha.nivel_experiencia }}</span>
+                        <span>NEX paranormal {{ ficha.nex }}%</span>
+                    {% elif ficha.nex is not None %}<span>NEX {{ ficha.nex }}%</span>{% endif %}
                     {% if ficha.estagio %}<span>Estágio {{ ficha.estagio }}</span>{% endif %}
                     {% for mesa in ficha_mesas %}<span>Mesa: {{ mesa.nome }}</span>{% endfor %}
                 </div>
             </div>
             <div class="sheet-seal" aria-hidden="true">
-                <svg class="die-icon die-d20"><use href="#die-d20"></use></svg>
+                <img class="die-icon" src="{% static 'icons/dices vector/d20.svg' %}" alt="">
                 <span class="seal-caption">MONOTOFOBIA</span>
             </div>
         </header>
-        {% if not pode_editar %}<p role="status">Ficha somente leitura para o jogador.</p>{% endif %}
         <nav class="tabs sheet-tabs" aria-label="Seções da ficha">
             <a href="#status">Status</a>
+            <a href="#progressao">Progressão</a>
             <a href="#pericias">Perícias</a>
+            <a href="#proficiencias">Trilha</a>
             <a href="#habilidades">Habilidades</a>
             <a href="#inventario">Inventário</a>
             <a href="#condicoes">Condições</a>
-            {% if pode_editar %}<a href="#rolagens">Rolagens</a>{% endif %}
+            <a href="#anotacoes">Anotações</a>
         </nav>
         {% if pode_alterar_status %}
             <details class="delete-confirm">
@@ -71,17 +56,21 @@
         {% endif %}
         <section id="status" class="sheet-status">
             <h2>Status</h2>
+            {% if not pode_editar %}<p role="status">Ficha somente leitura para o jogador.</p>{% endif %}
             <p>{{ ficha.classe|default:'Sem classe' }} · {{ ficha.get_status_display }}</p>
             <div class="sheet-overview" aria-label="Informações básicas do agente">
                 <article>
                     <span>Progressão</span>
                     <strong>
                         {% if ficha.patente_id %}{{ ficha.patente.nome }}
+                        {% elif sistema_progressao == 'nivel_nex' and ficha.classe_id and ficha.classe.slug != 'sobrevivente' and ficha.nivel_experiencia is not None %}Nível {{ ficha.nivel_experiencia }}
+                        {% elif ficha.classe_id and ficha.classe.slug == 'sobrevivente' and ficha.estagio %}Estágio {{ ficha.estagio }}
                         {% elif ficha.nex is not None %}NEX {{ ficha.nex }}%
-                        {% elif ficha.nivel_experiencia is not None %}Nível {{ ficha.nivel_experiencia }}
-                        {% elif ficha.estagio %}Estágio {{ ficha.estagio }}
                         {% else %}Não definida{% endif %}
                     </strong>
+                    {% if sistema_progressao == 'nivel_nex' and ficha.classe_id and ficha.classe.slug != 'sobrevivente' and ficha.nivel_experiencia is not None %}
+                        <small>Exposição paranormal: NEX {{ ficha.nex }}%</small>
+                    {% endif %}
                     {% if ficha.patente_id %}<small>Limite de PD {{ ficha.patente.limite_pd }} por turno · {{ ficha.patente.credito }}</small>{% endif %}
                 </article>
                 <article>
@@ -213,18 +202,46 @@
             </div>
             <p class="resource-overflow-hint">O que passar do máximo fica como recurso temporário e é consumido primeiro.</p>
             <p class="feedback" data-feedback role="status" aria-live="polite"></p>
+            <aside class="roll-toast" data-roll-result role="status" aria-live="polite" hidden>
+                <button type="button" class="roll-toast-close" data-close-roll-toast aria-label="Fechar resultado">×</button>
+                <strong class="roll-toast-total" data-roll-toast-total></strong>
+                <small class="roll-toast-equation" data-roll-toast-equation></small>
+            </aside>
             <h3>Atributos</h3>
             <dl class="stat-list">
-                <dt>Agilidade</dt><dd>{{ ficha.agilidade }}</dd>
-                <dt>Força</dt><dd>{{ ficha.forca }}</dd>
-                <dt>Intelecto</dt><dd>{{ ficha.intelecto }}</dd>
-                <dt>Presença</dt><dd>{{ ficha.presenca }}</dd>
-                <dt>Vigor</dt><dd>{{ ficha.vigor }}</dd>
-                <dt>Defesa</dt><dd><output data-defense>{{ defesa }}</output></dd>
+                <div class="attribute-roll-card">
+                    <dt>{% if pode_editar %}<button type="button" class="attribute-roll" data-roll-trigger data-roll-type="atributo" data-roll-target="agilidade">Agilidade</button>{% else %}Agilidade{% endif %}</dt>
+                    <dd>{{ ficha.agilidade }}</dd>
+                </div>
+                <div class="attribute-roll-card">
+                    <dt>{% if pode_editar %}<button type="button" class="attribute-roll" data-roll-trigger data-roll-type="atributo" data-roll-target="forca">Força</button>{% else %}Força{% endif %}</dt>
+                    <dd>{{ ficha.forca }}</dd>
+                </div>
+                <div class="attribute-roll-card">
+                    <dt>{% if pode_editar %}<button type="button" class="attribute-roll" data-roll-trigger data-roll-type="atributo" data-roll-target="intelecto">Intelecto</button>{% else %}Intelecto{% endif %}</dt>
+                    <dd>{{ ficha.intelecto }}</dd>
+                </div>
+                <div class="attribute-roll-card">
+                    <dt>{% if pode_editar %}<button type="button" class="attribute-roll" data-roll-trigger data-roll-type="atributo" data-roll-target="presenca">Presença</button>{% else %}Presença{% endif %}</dt>
+                    <dd>{{ ficha.presenca }}</dd>
+                </div>
+                <div class="attribute-roll-card">
+                    <dt>{% if pode_editar %}<button type="button" class="attribute-roll" data-roll-trigger data-roll-type="atributo" data-roll-target="vigor">Vigor</button>{% else %}Vigor{% endif %}</dt>
+                    <dd>{{ ficha.vigor }}</dd>
+                </div>
+                <div class="attribute-roll-card defense-card">
+                    <dt>Defesa</dt>
+                    <dd><output data-defense>{{ defesa }}</output></dd>
+                </div>
             </dl>
         </section>
         {% if pendencias %}
-            <section aria-labelledby="pending-heading">
+            <section class="sheet-pending" data-pending-panel data-ficha-id="{{ ficha.pk }}"
+                data-pending-signature="{% for pendencia in pendencias %}{{ pendencia.pk }}{% if not forloop.last %}-{% endif %}{% endfor %}"
+                aria-labelledby="pending-heading">
+                {% if pode_editar %}
+                    <button class="subpanel-close" type="button" data-dismiss-pending aria-label="Ocultar escolhas pendentes">×</button>
+                {% endif %}
                 <h2 id="pending-heading">Escolhas pendentes</h2>
                 <ul>
                     {% for pendencia in pendencias %}
@@ -244,10 +261,17 @@
             <ul class="inventory-list">
                 {% for item in itens_inventario %}
                     <li>
-                        <div>
+                        <div class="inventory-item-main">
+                            <div class="inventory-item-heading">
                             <strong>{{ item.nome }}</strong>
-                            <span>{{ item.quantidade }} × {{ item.espacos }} espaços · Categoria {{ item.categoria }} · {{ item.get_estado_display }}</span>
-                            {% if item.notas %}<p>{{ item.notas }}</p>{% endif %}
+                                <span>×{{ item.quantidade }}</span>
+                            </div>
+                            <dl class="inventory-item-meta">
+                                <div><dt>Categoria</dt><dd>{{ item.categoria }}</dd></div>
+                                <div><dt>Espaços</dt><dd>{{ item.espacos }} por unidade</dd></div>
+                                <div><dt>Estado</dt><dd>{{ item.get_estado_display }}</dd></div>
+                            </dl>
+                            {% if item.notas %}<p class="inventory-description">{{ item.notas }}</p>{% endif %}
                         </div>
                         {% if pode_editar %}
                             <div class="inventory-actions">
@@ -280,9 +304,21 @@
                 </form>
             {% endif %}
         </section>
+        <section id="progressao" aria-labelledby="progression-heading">
+            <h2 id="progression-heading">Progressão</h2>
+            {% if pode_configurar_ficha %}
+                <section aria-labelledby="sheet-settings-heading">
+                    <h3 id="sheet-settings-heading">Configuração da ficha</h3>
+                    <form method="post" action="{% url 'fichas:configurar_ficha' ficha.pk %}">
+                        {% csrf_token %}
+                        {{ formulario_configuracao_ficha.as_p }}
+                        <button class="button button-secondary" type="submit">Salvar configuração</button>
+                    </form>
+                </section>
+            {% endif %}
         {% if pode_avancar_nex %}
-            <section aria-labelledby="progression-heading">
-                <h2 id="progression-heading">Progressão</h2>
+            <section aria-labelledby="nex-progression-heading">
+                <h3 id="nex-progression-heading">Avançar NEX</h3>
                 <form method="post" action="{% url 'fichas:avancar_nex' ficha.pk %}">
                     {% csrf_token %}
                     {{ formulario_avanco.as_p }}
@@ -304,6 +340,7 @@
         {% if pode_registrar_exposicao %}
             <section aria-labelledby="exposure-heading">
                 <h2 id="exposure-heading">Exposição paranormal</h2>
+                <p>NEX paranormal atual: <strong>{{ ficha.nex }}%</strong>. Este registro altera exposição, não nível ou habilidades de classe.</p>
                 <form method="post" action="{% url 'fichas:registrar_exposicao' ficha.pk %}">
                     {% csrf_token %}
                     {{ formulario_exposicao.as_p }}
@@ -366,7 +403,7 @@
         {% endif %}
         {% if pode_avancar_estagio %}
             <section aria-labelledby="survivor-progression-heading">
-                <h2 id="survivor-progression-heading">Avanço de estágio</h2>
+                <h3 id="survivor-progression-heading">Avanço de estágio</h3>
                 <form method="post" action="{% url 'fichas:avancar_estagio' ficha.pk %}">
                     {% csrf_token %}
                     {{ formulario_estagio.as_p }}
@@ -374,13 +411,51 @@
                 </form>
             </section>
         {% endif %}
+        </section>
         <section id="pericias" class="sheet-skills">
             <h2>Perícias</h2>
             <ul class="skill-list">
                 {% for ficha_pericia in ficha_pericias %}
                     <li>
-                        <span class="skill-name">{{ ficha_pericia.pericia.nome }}</span>
+                        {% if pode_editar %}
+                            <button type="button" class="skill-roll" data-roll-trigger
+                                data-roll-type="pericia" data-roll-target="{{ ficha_pericia.pericia_id }}"
+                                {% if ficha_pericia.pericia.somente_treinada and ficha_pericia.grau == 'destreinado' %}disabled{% endif %}>
+                                <span class="skill-name">{{ ficha_pericia.pericia.nome }}</span>
+                                <span class="skill-pool">{{ ficha_pericia.resumo_dados }} {{ ficha_pericia.resumo_bonus }}</span>
+                            </button>
+                        {% else %}
+                            <span class="skill-roll-text">{{ ficha_pericia.pericia.nome }} · {{ ficha_pericia.resumo_dados }} {{ ficha_pericia.resumo_bonus }}</span>
+                        {% endif %}
                         <span class="skill-grade">{{ ficha_pericia.get_grau_display }}</span>
+                        <small class="skill-breakdown">
+                            Treinamento {{ ficha_pericia.resumo_treinamento }} ·
+                            Modificador {{ ficha_pericia.resumo_modificador }}
+                            {% if ficha_pericia.dados_extra %} · Dados da perícia {{ ficha_pericia.resumo_dados_extra }}{% endif %}
+                            {% if ficha_pericia.resumo_carga != '+0' %} · Carga {{ ficha_pericia.resumo_carga }}{% endif %}
+                            {% if ficha_pericia.dados_condicao %} · Condições {{ ficha_pericia.dados_condicao }} dado(s){% endif %}
+                            {% if ficha_pericia.dados_ferimento %} · Ferimentos {{ ficha_pericia.dados_ferimento }} dado(s){% endif %}
+                        </small>
+                        {% if pode_editar %}
+                            <details class="skill-adjustment">
+                                <summary aria-label="Editar grau e modificadores de {{ ficha_pericia.pericia.nome }}">Editar grau e modificadores</summary>
+                                <form method="post" action="{% url 'fichas:ajustar_pericia' ficha.pk ficha_pericia.pericia_id %}">
+                                    {% csrf_token %}
+                                    <label>Grau de treinamento
+                                        <select name="grau">
+                                            {% for valor, rotulo in ficha_pericia.GRAUS %}<option value="{{ valor }}"{% if ficha_pericia.grau == valor %} selected{% endif %}>{{ rotulo }}</option>{% endfor %}
+                                        </select>
+                                    </label>
+                                    <label>Dados extras ou penalidade
+                                        <input name="dados_extra" type="number" min="-10" max="10" value="{{ ficha_pericia.dados_extra }}" required>
+                                    </label>
+                                    <label>Modificador numérico
+                                        <input name="bonus_extra" type="number" min="-100" max="100" value="{{ ficha_pericia.bonus_extra }}" required>
+                                    </label>
+                                    <button class="button button-secondary" type="submit">Salvar ajustes</button>
+                                </form>
+                            </details>
+                        {% endif %}
                     </li>
                 {% empty %}
                     <li class="skill-empty">Nenhuma perícia registrada.</li>
@@ -388,7 +463,7 @@
             </ul>
         </section>
         <section id="proficiencias">
-            <h2>Trilha, poderes e rituais</h2>
+            <h2>Trilha</h2>
             {% if ficha.trilha or ficha.trilha_nome_personalizado %}
                 <p>
                     <strong>Trilha:</strong>
@@ -398,31 +473,58 @@
                     {% endif %}
                 </p>
             {% endif %}
-            <h3>Poderes</h3>
-            <ul>
-                {% for ficha_poder in ficha_poderes %}
-                    <li>
-                        <strong>{% if ficha_poder.poder %}{{ ficha_poder.poder.nome }}{% else %}{{ ficha_poder.nome_personalizado }}{% endif %}</strong>
-                        <span class="muted">{{ ficha_poder.fonte }}</span>
-                        {% if ficha_poder.resumo_personalizado %}<p>{{ ficha_poder.resumo_personalizado }}</p>
-                        {% elif ficha_poder.poder %}<p>{{ ficha_poder.poder.resumo }}</p>{% endif %}
-                    </li>
-                {% empty %}<li>Nenhum poder registrado.</li>{% endfor %}
-            </ul>
-            <h3>Rituais</h3>
-            <ul>
-                {% for ficha_ritual in ficha_rituais %}
-                    <li>
-                        <strong>{% if ficha_ritual.ritual %}{{ ficha_ritual.ritual.nome }}{% else %}{{ ficha_ritual.nome_personalizado }}{% endif %}</strong>
-                        <span class="muted">{{ ficha_ritual.fonte }}</span>
-                        {% if ficha_ritual.resumo_personalizado %}<p>{{ ficha_ritual.resumo_personalizado }}</p>
-                        {% elif ficha_ritual.ritual %}<p>{{ ficha_ritual.ritual.resumo }}</p>{% endif %}
-                    </li>
-                {% empty %}<li>Nenhum ritual registrado.</li>{% endfor %}
-            </ul>
+            {% if ficha.afinidade_elemento %}
+                <p><strong>Afinidade elemental:</strong> {{ ficha.get_afinidade_elemento_display }}</p>
+            {% endif %}
+            {% if habilidades_trilha_adquiridas %}
+                <h3>Habilidades adquiridas</h3>
+                <ul>
+                    {% for habilidade in habilidades_trilha_adquiridas %}
+                        <li>
+                            <strong>{{ habilidade.nome }}</strong>
+                            <span class="muted">{{ habilidade.marco_rotulo }}</span>
+                            <p>{{ habilidade.resumo }}</p>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+            {% if habilidades_trilha_proximas %}
+                <details class="track-upcoming">
+                    <summary>Próximas aquisições</summary>
+                    <ul>
+                        {% for habilidade in habilidades_trilha_proximas %}
+                            <li>
+                                <strong>{{ habilidade.nome }}</strong>
+                                <span class="muted">{{ habilidade.marco_rotulo }}</span>
+                                <p>{{ habilidade.resumo }}</p>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </details>
+            {% endif %}
         </section>
         <section id="habilidades" aria-labelledby="abilities-heading">
-            <h2 id="abilities-heading">Habilidades</h2>
+            <h2 id="abilities-heading">Habilidades, poderes e rituais</h2>
+            {% if pode_editar %}
+                <details class="ability-manager">
+                    <summary class="button">Adicionar</summary>
+                    <div class="ability-manager-options">
+                        <form class="ability-form" method="post" action="{% url 'fichas:adicionar_habilidade' ficha.pk %}">
+                            {% csrf_token %}
+                            <h3>Habilidade ou poder</h3>
+                            {{ formulario_habilidade.as_p }}
+                            <button class="button button-secondary" type="submit">Adicionar à ficha</button>
+                        </form>
+                        <form class="ability-form" method="post" action="{% url 'fichas:adicionar_ritual_ficha' ficha.pk %}">
+                            {% csrf_token %}
+                            <h3>Ritual</h3>
+                            <p class="muted">Se o catálogo não tiver o ritual, registre um placeholder personalizado.</p>
+                            {{ formulario_ritual.as_p }}
+                            <button class="button button-secondary" type="submit">Salvar ritual</button>
+                        </form>
+                    </div>
+                </details>
+            {% endif %}
             <ul class="ability-list">
                 {% for habilidade in ficha_habilidades %}
                     <li>
@@ -432,6 +534,14 @@
                             <span class="muted">Adicionada por {{ habilidade.criada_por.username|default:'Mestre' }}</span>
                         </div>
                         {% if pode_editar %}
+                            <details class="ability-edit">
+                                <summary>Editar</summary>
+                                <form class="ability-form" method="post" action="{% url 'fichas:editar_habilidade' ficha.pk habilidade.pk %}">
+                                    {% csrf_token %}
+                                    {{ habilidade.formulario_edicao.as_p }}
+                                    <button class="button button-secondary" type="submit">Salvar alterações</button>
+                                </form>
+                            </details>
                             <form method="post" action="{% url 'fichas:remover_habilidade' ficha.pk habilidade.pk %}">
                                 {% csrf_token %}
                                 <button class="button button-secondary" type="submit">Remover</button>
@@ -442,13 +552,61 @@
                     <li class="muted">Nenhuma habilidade personalizada registrada.</li>
                 {% endfor %}
             </ul>
-            {% if pode_editar %}
-                <form class="ability-form" method="post" action="{% url 'fichas:adicionar_habilidade' ficha.pk %}">
-                    {% csrf_token %}
-                    {{ formulario_habilidade.as_p }}
-                    <button class="button" type="submit">Adicionar habilidade</button>
-                </form>
-            {% endif %}
+            <h3>Poderes</h3>
+            <ul class="ability-list">
+                {% for ficha_poder in ficha_poderes %}
+                    <li>
+                        <div>
+                            <strong>{% if ficha_poder.nome_personalizado %}{{ ficha_poder.nome_personalizado }}{% elif ficha_poder.poder %}{{ ficha_poder.poder.nome }}{% endif %}</strong>
+                            <span class="muted">{{ ficha_poder.fonte }}</span>
+                            {% if ficha_poder.resumo_personalizado %}<p>{{ ficha_poder.resumo_personalizado }}</p>
+                            {% elif ficha_poder.poder %}<p>{{ ficha_poder.poder.resumo }}</p>{% endif %}
+                            {% if ficha_poder.poder.afinidade_resumo %}<p><strong>Benefício ao escolher novamente com afinidade:</strong> {{ ficha_poder.poder.afinidade_resumo }}</p>{% endif %}
+                        </div>
+                        {% if pode_editar %}
+                            <details class="ability-edit">
+                                <summary>Editar</summary>
+                                <form class="ability-form" method="post" action="{% url 'fichas:editar_poder_ficha' ficha.pk ficha_poder.pk %}">
+                                    {% csrf_token %}
+                                    {{ ficha_poder.formulario_edicao.as_p }}
+                                    <button class="button button-secondary" type="submit">Salvar alterações</button>
+                                </form>
+                            </details>
+                            <form method="post" action="{% url 'fichas:remover_poder_ficha' ficha.pk ficha_poder.pk %}">
+                                {% csrf_token %}
+                                <button class="button button-secondary" type="submit">Remover</button>
+                            </form>
+                        {% endif %}
+                    </li>
+                {% empty %}<li class="muted">Nenhum poder registrado.</li>{% endfor %}
+            </ul>
+            <h3>Rituais</h3>
+            <ul class="ability-list">
+                {% for ficha_ritual in ficha_rituais %}
+                    <li>
+                        <div>
+                            <strong>{% if ficha_ritual.ritual %}{{ ficha_ritual.ritual.nome }}{% else %}{{ ficha_ritual.nome_personalizado }}{% endif %}</strong>
+                            <span class="muted">{{ ficha_ritual.fonte }}</span>
+                            {% if ficha_ritual.resumo_personalizado %}<p>{{ ficha_ritual.resumo_personalizado }}</p>
+                            {% elif ficha_ritual.ritual %}<p>{{ ficha_ritual.ritual.resumo }}</p>{% endif %}
+                        </div>
+                        {% if pode_editar %}
+                            <details class="ability-edit">
+                                <summary>Editar</summary>
+                                <form class="ability-form" method="post" action="{% url 'fichas:editar_ritual_ficha' ficha.pk ficha_ritual.pk %}">
+                                    {% csrf_token %}
+                                    {{ ficha_ritual.formulario_edicao.as_p }}
+                                    <button class="button button-secondary" type="submit">Salvar alterações</button>
+                                </form>
+                            </details>
+                            <form method="post" action="{% url 'fichas:remover_ritual_ficha' ficha.pk ficha_ritual.pk %}">
+                                {% csrf_token %}
+                                <button class="button button-secondary" type="submit">Remover</button>
+                            </form>
+                        {% endif %}
+                    </li>
+                {% empty %}<li class="muted">Nenhum ritual registrado.</li>{% endfor %}
+            </ul>
         </section>
         <section id="condicoes" class="sheet-conditions">
             <h2>Condições</h2>
@@ -514,8 +672,9 @@
             </section>
         {% endif %}
         {% if pode_editar %}
-        <section id="rolagens" class="roll-panel sheet-roll-panel" aria-labelledby="roll-heading">
-            <h2 id="roll-heading">Teste</h2>
+        <section class="roll-panel sheet-roll-panel roll-advanced-panel" aria-labelledby="advanced-roll-heading">
+            <h2 id="advanced-roll-heading">Rolagem avançada</h2>
+            <p class="muted">Os testes comuns rolam ao clicar em um atributo ou perícia.</p>
             <form data-roll-form>
                 <label for="roll-type">Tipo</label>
                 <select id="roll-type" name="tipo">
@@ -531,6 +690,8 @@
                             data-wound-dice="{{ alvo.dados_ferimentos }}"
                             data-attribute-value="{{ alvo.atributo_valor }}"
                             data-training-bonus="{{ alvo.bonus_treinamento }}"
+                            data-skill-modifier="{{ alvo.bonus_modificador_pericia|default:0 }}"
+                            data-skill-extra-dice="{{ alvo.dados_extra_pericia|default:0 }}"
                             data-training-required="{{ alvo.treinamento_obrigatorio|yesno:'true,false' }}"
                             data-trained="{{ alvo.treinado|yesno:'true,false' }}"
                             data-condition-dice="{{ alvo.dados_condicao }}"
@@ -550,7 +711,7 @@
                     <label for="roll-extra-dice">Dados extras ou penalidade em dados</label>
                     <input id="roll-extra-dice" name="dados_extras" type="number" min="-10" max="10" value="0">
                     <label class="kit-availability checklist-control" data-kit-field hidden for="roll-kit-available">
-                        <input id="roll-kit-available" name="kit_disponivel" type="checkbox">
+                        <input id="roll-kit-available" name="kit_disponivel" type="checkbox" checked>
                         Tenho o kit adequado para esta perícia
                     </label>
                     {% if ficha.estagio == 5 and ficha.classe.slug == 'sobrevivente' and ficha.cicatrizado_perigo %}
@@ -568,9 +729,8 @@
                 <p class="muted">Atributo, treinamento, condições, carga e ferimentos são considerados automaticamente.</p>
                 <button class="button" type="submit" data-roll-submit>Rolar teste</button>
             </form>
-            <p class="roll-result" data-roll-result role="status" aria-live="polite"></p>
         </section>
-        <section class="roll-panel sheet-roll-panel" aria-labelledby="damage-heading">
+        <section class="roll-panel sheet-roll-panel sheet-damage-panel" aria-labelledby="damage-heading">
             <h2 id="damage-heading">Dano</h2>
             <p>Informe os dados da arma ou efeito. Em crítico, multiplique apenas a quantidade de dados; o bônus numérico é somado uma vez.</p>
             <form data-damage-form>
@@ -582,41 +742,50 @@
                     <legend>Dados comuns</legend>
                     <div class="die-picker-options">
                         <button class="die-choice" type="button" data-die-face="4" aria-label="Selecionar dado de 4 faces" aria-pressed="false">
-                            <svg class="die-icon die-d4" aria-hidden="true"><use href="#die-d4"></use></svg><span>D4</span>
+                            <img class="die-icon" src="{% static 'icons/dices vector/d4.svg' %}" alt=""><span>D4</span>
                         </button>
                         <button class="die-choice" type="button" data-die-face="6" aria-label="Selecionar dado de 6 faces" aria-pressed="true">
-                            <svg class="die-icon die-d6" aria-hidden="true"><use href="#die-d6"></use></svg><span>D6</span>
+                            <img class="die-icon" src="{% static 'icons/dices vector/d6.svg' %}" alt=""><span>D6</span>
                         </button>
                         <button class="die-choice" type="button" data-die-face="8" aria-label="Selecionar dado de 8 faces" aria-pressed="false">
-                            <svg class="die-icon die-d8" aria-hidden="true"><use href="#die-d8"></use></svg><span>D8</span>
+                            <img class="die-icon" src="{% static 'icons/dices vector/d8.svg' %}" alt=""><span>D8</span>
                         </button>
                         <button class="die-choice" type="button" data-die-face="10" aria-label="Selecionar dado de 10 faces" aria-pressed="false">
-                            <svg class="die-icon die-d10" aria-hidden="true"><use href="#die-d10"></use></svg><span>D10</span>
+                            <img class="die-icon" src="{% static 'icons/dices vector/d10.svg' %}" alt=""><span>D10</span>
                         </button>
                         <button class="die-choice" type="button" data-die-face="12" aria-label="Selecionar dado de 12 faces" aria-pressed="false">
-                            <svg class="die-icon die-d12" aria-hidden="true"><use href="#die-d12"></use></svg><span>D12</span>
+                            <img class="die-icon" src="{% static 'icons/dices vector/d12.svg' %}" alt=""><span>D12</span>
                         </button>
                         <button class="die-choice" type="button" data-die-face="20" aria-label="Selecionar dado de 20 faces" aria-pressed="false">
-                            <svg class="die-icon die-d20" aria-hidden="true"><use href="#die-d20"></use></svg><span>D20</span>
+                            <img class="die-icon" src="{% static 'icons/dices vector/d20.svg' %}" alt=""><span>D20</span>
                         </button>
                     </div>
                 </fieldset>
                 <label for="damage-bonus">Bônus numérico</label>
                 <input id="damage-bonus" name="bonus" type="number" min="-1000" max="1000" value="0" required>
-                <label for="damage-critical-multiplier">Multiplicador crítico</label>
-                <input id="damage-critical-multiplier" name="multiplicador_critico" type="number" min="1" max="10" value="1" required>
                 <button class="button" type="submit">Rolar dano</button>
             </form>
-            <p data-damage-result role="status" aria-live="polite"></p>
         </section>
         {% endif %}
-        {% if ficha.anotacoes_jogador %}<section class="sheet-notes"><h2>Anotações privadas</h2><p>{{ ficha.anotacoes_jogador }}</p></section>{% endif %}
-        {% if mestre and ficha.anotacoes_mestre %}<section><h2>Anotações do mestre</h2><p>{{ ficha.anotacoes_mestre }}</p></section>{% endif %}
+        <section id="anotacoes" class="sheet-notes" aria-labelledby="notes-heading">
+            <h2 id="notes-heading">Anotações</h2>
+            {% if pode_editar %}
+                <form method="post" action="{% url 'fichas:salvar_anotacoes' ficha.pk %}">
+                    {% csrf_token %}
+                    {{ formulario_anotacoes.as_p }}
+                    <button class="button" type="submit">Salvar anotações</button>
+                </form>
+            {% else %}
+                {% if ficha.anotacoes_jogador %}<h3>Anotações do jogador</h3><p>{{ ficha.anotacoes_jogador }}</p>{% endif %}
+                {% if mestre and ficha.anotacoes_mestre %}<h3>Anotações do mestre</h3><p>{{ ficha.anotacoes_mestre }}</p>{% endif %}
+                {% if not ficha.anotacoes_jogador and not ficha.anotacoes_mestre %}<p class="muted">Nenhuma anotação registrada.</p>{% endif %}
+            {% endif %}
+        </section>
     </main>
 </div>
 {% endblock %}
 
 {% block scripts %}
     {% load static %}
-    <script src="{% static 'js/ficha.js' %}?v=6" defer></script>
+    <script src="{% static 'js/ficha.js' %}?v=10" defer></script>
 {% endblock %}

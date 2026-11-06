@@ -27,8 +27,35 @@ from .models import (
     RegistroCena,
 )
 from fichas.forms import ConfiguracaoMesaForm
-from fichas.models import Condicao, ConfiguracaoMesa, Ficha, FichaCondicao, LogAlteracao, Rolagem
+from fichas.models import (
+    Condicao,
+    ConfiguracaoFicha,
+    ConfiguracaoMesa,
+    Ficha,
+    FichaCondicao,
+    LogAlteracao,
+    RegistroPrestigio,
+    Rolagem,
+)
 from fichas.permissions import fichas_visiveis_para, is_mestre
+from fichas.views import _configuracao_para_ficha, _maximos_ficha
+
+
+def _sincronizar_configuracao_individual(ficha):
+    mesa = ConfiguracaoMesa.objects.filter(pk=1).first() or ConfiguracaoMesa()
+    sistema_progressao = mesa.sistema_progressao
+    if ficha.classe_id and ficha.classe.slug == 'sobrevivente' and sistema_progressao == 'patentes':
+        sistema_progressao = 'nex'
+    ConfiguracaoFicha.objects.update_or_create(
+        ficha=ficha,
+        defaults={
+            'modo_recursos': mesa.modo_recursos,
+            'sistema_progressao': sistema_progressao,
+            'ferimentos_debilitantes': mesa.ferimentos_debilitantes,
+            'jogador_pode_subir_nex': mesa.jogador_pode_subir_nex,
+            'numero_sessao': mesa.numero_sessao,
+        },
+    )
 
 
 # Views privadas novas devem usar @login_required ou LoginRequiredMixin.
@@ -118,10 +145,32 @@ def inscrever_ficha_mesa(request):
 
     ficha = dados['ficha']
     with transaction.atomic():
+        ficha = Ficha.objects.select_for_update().select_related(
+            'classe',
+        ).get(pk=ficha.pk)
+        configuracao_mesa = ConfiguracaoMesa.objects.filter(pk=1).first() or ConfiguracaoMesa()
+        configuracao_individual = ConfiguracaoFicha.objects.select_for_update().filter(
+            ficha=ficha,
+        ).first()
+        if (
+            configuracao_individual
+            and (not ficha.classe_id or ficha.classe.slug != 'sobrevivente')
+            and any(
+                getattr(configuracao_individual, campo) != getattr(configuracao_mesa, campo)
+                for campo in ('modo_recursos', 'sistema_progressao', 'ferimentos_debilitantes')
+            )
+        ):
+            messages.error(
+                request,
+                'Ajuste modo de recursos, progressão e regras opcionais para coincidir '
+                'com a mesa antes de inscrever esta ficha.',
+            )
+            return redirect('lista_mesas')
         if InscricaoMesa.objects.select_for_update().filter(mesa=mesa, ficha=ficha).exists():
             messages.error(request, 'Esta ficha já está inscrita nessa mesa.')
             return redirect('lista_mesas')
         InscricaoMesa.objects.create(mesa=mesa, ficha=ficha)
+        _sincronizar_configuracao_individual(ficha)
     messages.success(request, f'Ficha “{ficha.nome}” inscrita na mesa “{mesa.nome}”.')
     return redirect('lista_mesas')
 
@@ -134,9 +183,17 @@ def remover_inscricao_mesa(request, mesa_pk, ficha_pk):
     inscricoes = InscricaoMesa.objects.filter(mesa=mesa, ficha_id=ficha_pk)
     if not is_mestre(request.user) or mesa.mestre_id != request.user.pk:
         inscricoes = inscricoes.filter(ficha__dono=request.user)
-    inscricao = get_object_or_404(inscricoes.select_related('ficha'))
-    nome_ficha = inscricao.ficha.nome
-    inscricao.delete()
+    with transaction.atomic():
+        inscricao = get_object_or_404(
+            inscricoes.select_for_update().select_related('ficha__classe'),
+        )
+        ficha = Ficha.objects.select_for_update().select_related('classe').get(
+            pk=inscricao.ficha_id,
+        )
+        nome_ficha = ficha.nome
+        inscricao.delete()
+        if not InscricaoMesa.objects.filter(ficha=ficha).exists():
+            _sincronizar_configuracao_individual(ficha)
     messages.success(request, f'Ficha “{nome_ficha}” removida da mesa “{mesa.nome}”.')
     if is_mestre(request.user) and mesa.mestre_id == request.user.pk:
         return redirect(f'{reverse("painel_mestre")}#mesas')
@@ -149,7 +206,16 @@ def remover_inscricao_mesa(request, mesa_pk, ficha_pk):
 def excluir_mesa(request, pk):
     mesa = get_object_or_404(Mesa, pk=pk, mestre=request.user)
     nome = mesa.nome
-    mesa.delete()
+    with transaction.atomic():
+        fichas = list(
+            Ficha.objects.select_for_update().select_related('classe').filter(
+                inscricoes_mesa__mesa=mesa,
+            ).distinct()
+        )
+        mesa.delete()
+        for ficha in fichas:
+            if not InscricaoMesa.objects.filter(ficha=ficha).exists():
+                _sincronizar_configuracao_individual(ficha)
     messages.success(request, f'Mesa “{nome}” excluída. As fichas não foram apagadas.')
     return redirect(f'{reverse("painel_mestre")}#mesas')
 
@@ -171,14 +237,38 @@ def painel_mestre(request):
     return contexto_painel_mestre(request)
 
 
+def _recursos_painel_ficha(ficha):
+    mesa_ficha = _configuracao_para_ficha(ficha)
+    try:
+        maximos = _maximos_ficha(ficha, mesa_ficha)
+    except ValueError:
+        maximos = {'pv': 0, 'pe': 0, 'san': 0, 'pd': 0}
+    recursos_ativos = (
+        (('pv', 'PV'), ('pe', 'PE'), ('san', 'SAN'))
+        if mesa_ficha.modo_recursos == 'padrao'
+        else (('pv', 'PV'), ('pd', 'PD'))
+    )
+    return [
+        {
+            'chave': chave,
+            'rotulo': rotulo,
+            'atual': getattr(ficha, f'{chave}_atual'),
+            'maximo': maximos[chave],
+        }
+        for chave, rotulo in recursos_ativos
+    ]
+
+
 def contexto_painel_mestre(
     request, *, formulario_configuracao=None, formulario_cena=None, status=200,
 ):
     if not is_mestre(request.user):
         raise PermissionDenied
-    fichas = Ficha.objects.select_related(
+    fichas = list(Ficha.objects.select_related(
         'dono', 'classe', 'patente',
-    ).order_by('status', 'nome', 'pk')
+    ).order_by('status', 'nome', 'pk'))
+    for ficha in fichas:
+        ficha.recursos_painel = _recursos_painel_ficha(ficha)
     filtro_rolagem = request.GET.get('ficha', '')
     rolagens_queryset = Rolagem.objects.select_related(
         'ficha', 'usuario',
@@ -263,7 +353,9 @@ def atualizacoes_painel_mestre(request):
     if not cursor_texto.isdecimal() or len(cursor_texto) > 18:
         return JsonResponse({'erro': 'Cursor de rolagens inválido.'}, status=400)
     cursor = int(cursor_texto)
-    fichas = Ficha.objects.select_related('dono', 'classe').order_by('status', 'nome', 'pk')
+    fichas = list(Ficha.objects.select_related('dono', 'classe', 'patente').order_by('status', 'nome', 'pk'))
+    for ficha in fichas:
+        ficha.recursos_painel = _recursos_painel_ficha(ficha)
     novas_rolagens = list(Rolagem.objects.filter(pk__gt=cursor).select_related(
         'ficha', 'usuario',
     ).order_by('pk')[:50])
@@ -277,6 +369,8 @@ def atualizacoes_painel_mestre(request):
                 'jogador': ficha.dono.username,
                 'classe': str(ficha.classe) if ficha.classe_id else 'Sem classe',
                 'status': ficha.get_status_display(),
+                'selecionavel': ficha.status == 'ativa',
+                'recursos': ficha.recursos_painel,
             }
             for ficha in fichas
         ],
@@ -406,6 +500,20 @@ def alterar_estado_cena(request, pk):
             cena=cena, usuario=request.user, acao='publicada' if cena.ativa else 'ocultada',
         )
     messages.success(request, 'Cena visível aos jogadores.' if cena.ativa else 'Cena ocultada dos jogadores.')
+    return redirect(f'{reverse("painel_mestre")}#cenas')
+
+
+@login_required
+@require_POST
+@ratelimit(key='user', rate='6/h', method='POST', block=True)
+def excluir_cena(request, pk):
+    if not is_mestre(request.user):
+        raise PermissionDenied
+    with transaction.atomic():
+        cena = get_object_or_404(CenaMesa.objects.select_for_update(), pk=pk)
+        nome = cena.nome
+        cena.delete()
+    messages.success(request, f'Cena “{nome}” excluída com suas pistas e registros.')
     return redirect(f'{reverse("painel_mestre")}#cenas')
 
 
@@ -546,8 +654,31 @@ def iniciar_nova_sessao(request):
         mesa, _ = ConfiguracaoMesa.objects.select_for_update().get_or_create(pk=1)
         mesa.numero_sessao += 1
         mesa.save(update_fields=('numero_sessao',))
+        ConfiguracaoFicha.objects.update(numero_sessao=mesa.numero_sessao)
     messages.success(
         request,
         f'Sessão {mesa.numero_sessao} iniciada. Os usos por sessão foram renovados.',
+    )
+    return redirect('painel_mestre')
+
+
+@login_required
+@require_POST
+@ratelimit(key='user', rate='3/h', method='POST', block=True)
+def limpar_contagem_sessoes(request):
+    if not is_mestre(request.user):
+        raise PermissionDenied
+    with transaction.atomic():
+        mesa, _ = ConfiguracaoMesa.objects.select_for_update().get_or_create(pk=1)
+        mesa.numero_sessao = 0
+        mesa.save(update_fields=('numero_sessao',))
+        ConfiguracaoFicha.objects.update(numero_sessao=0)
+        RegistroPrestigio.objects.update(numero_sessao=0)
+        Ficha.objects.filter(cicatrizado_sessao_usada__isnull=False).update(
+            cicatrizado_sessao_usada=None,
+        )
+    messages.success(
+        request,
+        'Contagem zerada sem apagar registros. Inicie a próxima sessão para começar em 1.',
     )
     return redirect('painel_mestre')

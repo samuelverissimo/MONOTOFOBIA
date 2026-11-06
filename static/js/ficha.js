@@ -6,6 +6,104 @@
     let atualizarInstrucaoRolagem = () => {};
     let bloqueioTela = null;
 
+    document.querySelectorAll(
+        'details.skill-adjustment, details.ability-manager, details.ability-edit, '
+        + 'details.delete-confirm',
+    ).forEach((details) => {
+        details.dataset.closeable = '';
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'subpanel-close';
+        close.dataset.closeDetails = '';
+        close.setAttribute('aria-label', 'Fechar painel');
+        close.textContent = '×';
+        details.append(close);
+    });
+
+    function fecharDetalhe(details) {
+        if (!details?.open || details.classList.contains('is-closing')) return;
+        details.classList.add('is-closing');
+        window.setTimeout(() => {
+            details.open = false;
+            details.classList.remove('is-closing');
+        }, 180);
+    }
+
+    document.addEventListener('click', (event) => {
+        const summary = event.target.closest(
+            'details.skill-adjustment > summary, details.ability-manager > summary, '
+            + 'details.ability-edit > summary, details.track-upcoming > summary, '
+            + 'details.delete-confirm > summary, details.roll-advanced > summary',
+        );
+        if (summary?.parentElement.open) {
+            event.preventDefault();
+            fecharDetalhe(summary.parentElement);
+            return;
+        }
+        const close = event.target.closest('[data-close-details]');
+        if (close) {
+            event.preventDefault();
+            fecharDetalhe(close.closest('details'));
+            return;
+        }
+        const dismissPending = event.target.closest('[data-dismiss-pending]');
+        if (dismissPending) {
+            const pendencias = dismissPending.closest('.sheet-pending');
+            if (pendencias) {
+                try {
+                    window.sessionStorage.setItem(
+                        `monotofobia:pendencias:${pendencias.dataset.fichaId}`,
+                        pendencias.dataset.pendingSignature,
+                    );
+                } catch {
+                    // Storage may be disabled; dismissal still applies to this page.
+                }
+                pendencias.classList.add('is-leaving');
+                window.setTimeout(() => { pendencias.hidden = true; }, 180);
+            }
+        }
+    });
+
+    const painelPendencias = document.querySelector('[data-pending-panel]');
+    if (painelPendencias) {
+        try {
+            const assinaturaSalva = window.sessionStorage.getItem(
+                `monotofobia:pendencias:${painelPendencias.dataset.fichaId}`,
+            );
+            if (assinaturaSalva === painelPendencias.dataset.pendingSignature) {
+                painelPendencias.hidden = true;
+            }
+        } catch {
+            // Storage may be disabled; keep the pending panel visible.
+        }
+    }
+
+    function preencherCamposCatalogo(select, nomeCampo, descricaoCampo) {
+        if (!select || !nomeCampo || !descricaoCampo) return;
+        const opcao = select.selectedOptions[0];
+        if (!opcao) {
+            nomeCampo.value = '';
+            descricaoCampo.value = '';
+            return;
+        }
+        const nome = opcao.dataset.powerName || opcao.dataset.ritualName || '';
+        const descricao = opcao.dataset.powerDescription || opcao.dataset.ritualDescription || '';
+        nomeCampo.value = nome;
+        descricaoCampo.value = descricao;
+    }
+
+    document.addEventListener('change', (event) => {
+        const select = event.target.closest('[name="poder"], [name="ritual"]');
+        if (!select) return;
+        const form = select.closest('form');
+        const nomeCampo = form?.querySelector('[name="nome_personalizado"]');
+        const descricaoCampo = form?.querySelector('[name="resumo_personalizado"]');
+        if (!nomeCampo || !descricaoCampo) return;
+        if (select.value) {
+            preencherCamposCatalogo(select, nomeCampo, descricaoCampo);
+        }
+    });
+
     function atualizarExcedente(recurso, atual, maximo) {
         const indicador = document.querySelector(`[data-overflow="${recurso}"]`);
         if (!indicador) return;
@@ -253,6 +351,8 @@
     const alvo = document.querySelector('#roll-target');
     const rolagem = document.querySelector('[data-roll-form]');
     const resultadoRolagem = document.querySelector('[data-roll-result]');
+    const totalRolagem = document.querySelector('[data-roll-toast-total]');
+    const equacaoRolagem = document.querySelector('[data-roll-toast-equation]');
     const bonusExtra = document.querySelector('#roll-bonus');
     const dadosExtras = document.querySelector('#roll-extra-dice');
     const dtInput = document.querySelector('#roll-dt');
@@ -262,6 +362,33 @@
     const kitCheckbox = document.querySelector('#roll-kit-available');
     const cicatrizadoField = document.querySelector('[data-cicatrizado-field]');
     const cicatrizadoCheckbox = document.querySelector('#roll-cicatrizado-perigo');
+    let temporizadorToast = null;
+    function ocultarToast() {
+        if (!resultadoRolagem || resultadoRolagem.hidden) return;
+        resultadoRolagem.classList.add('is-leaving');
+        window.clearTimeout(temporizadorToast);
+        temporizadorToast = window.setTimeout(() => {
+            resultadoRolagem.hidden = true;
+            resultadoRolagem.classList.remove('is-leaving');
+        }, 180);
+    }
+    function mostrarToast(total, equacao, erro = false) {
+        if (!resultadoRolagem || !totalRolagem || !equacaoRolagem) return;
+        window.clearTimeout(temporizadorToast);
+        resultadoRolagem.classList.remove('is-leaving');
+        totalRolagem.textContent = total;
+        equacaoRolagem.textContent = equacao;
+        resultadoRolagem.dataset.error = String(erro);
+        resultadoRolagem.hidden = false;
+        temporizadorToast = window.setTimeout(() => {
+            ocultarToast();
+        }, 4800);
+    }
+    document.addEventListener('click', (event) => {
+        const fechar = event.target.closest('[data-close-roll-toast]');
+        if (!fechar || !resultadoRolagem) return;
+        ocultarToast();
+    });
     if (tipo && alvo && rolagem && bonusExtra && dadosExtras && instrucoes) {
         function ehTesteResistencia(opcao) {
             return tipo.value === 'pericia'
@@ -270,32 +397,36 @@
 
         function calcularPool() {
             const opcao = alvo.selectedOptions[0];
-            const bonusDados = Number(dadosExtras.value) || 0;
-            const dadosCondicao = tipo.value === 'livre' ? 0 : Number(opcao.dataset.conditionDice) || 0;
-            const dadosFerimento = tipo.value === 'livre' ? 0 : Number(opcao.dataset.woundDice) || 0;
-            const atributo = tipo.value === 'livre' ? 1 : Number(opcao.dataset.attributeValue);
-            const penalidadeCicatrizado = ehTesteResistencia(opcao) && cicatrizadoCheckbox?.checked
-                ? -1
-                : 0;
-            const extras = tipo.value === 'livre'
-                ? Number(alvo.value) - 1 + bonusDados + dadosCondicao
-                : bonusDados + dadosCondicao + dadosFerimento + penalidadeCicatrizado;
-            let quantidade;
-            let menor;
-            if (atributo === 0) {
-                quantidade = 2 + extras;
-                quantidade = quantidade < 1 ? 2 + Math.abs(extras) : quantidade;
-                menor = true;
-            } else {
-                quantidade = atributo + extras;
-                if (quantidade < 1) {
-                    quantidade = atributo + Math.abs(extras);
-                    menor = true;
-                } else {
-                    menor = false;
-                }
+            if (!opcao) return { quantidade: 0, menor: false };
+
+            if (tipo.value === 'livre') {
+                const quantidade = Number(alvo.value) || 1;
+                return { quantidade, menor: false };
             }
-            return { quantidade, menor };
+
+            const atributo = Number(opcao.dataset.attributeValue) || 0;
+            const bonusDados = Number(dadosExtras.value) || 0;
+            const dadosPericia = Number(opcao.dataset.skillExtraDice) || 0;
+            const dadosCondicao = Number(opcao.dataset.conditionDice) || 0;
+            const dadosFerimento = Number(opcao.dataset.woundDice) || 0;
+            const extras = bonusDados + dadosPericia + dadosCondicao + dadosFerimento;
+
+            if (atributo === 0) {
+                const quantidade = 2 + extras;
+                return {
+                    quantidade: quantidade < 1 ? 2 + Math.abs(extras) : quantidade,
+                    menor: true,
+                };
+            }
+
+            const quantidade = atributo + extras;
+            if (quantidade < 1) {
+                return {
+                    quantidade: atributo + Math.abs(extras),
+                    menor: true,
+                };
+            }
+            return { quantidade, menor: false };
         }
 
         function atualizarInstrucao() {
@@ -308,12 +439,15 @@
             const bonusTreinamento = tipo.value === 'pericia'
                 ? Number(opcao.dataset.trainingBonus)
                 : 0;
+            const bonusPericia = tipo.value === 'pericia'
+                ? Number(opcao.dataset.skillModifier) || 0
+                : 0;
             const kitRequired = tipo.value === 'pericia' && opcao.dataset.kitRequired === 'true';
             const penalidadeKit = kitRequired && !kitCheckbox.checked ? -5 : 0;
             const penalidadeCarga = tipo.value === 'pericia'
                 ? Number(opcao.dataset.loadPenalty) || 0
                 : 0;
-            const bonus = bonusTreinamento + penalidadeCarga + penalidadeKit
+            const bonus = bonusTreinamento + bonusPericia + penalidadeCarga + penalidadeKit
                 + (Number(bonusExtra.value) || 0);
             const operador = bonus > 0 ? '+' : '';
             const instrucaoDados = menor ? 'use o menor' : 'use o maior';
@@ -327,11 +461,14 @@
                 : '';
             const modificadorKit = penalidadeKit ? ' Sem kit adequado: −5.' : '';
             const modificadorCarga = penalidadeCarga ? ' Sobrecarga: −5.' : '';
+            const detalhePericia = tipo.value === 'pericia'
+                ? ` Treinamento ${bonusTreinamento >= 0 ? '+' : ''}${bonusTreinamento}; modificador da perícia ${bonusPericia >= 0 ? '+' : ''}${bonusPericia}.`
+                : '';
             const resistencia = ehTesteResistencia(opcao);
             const modificadorCicatrizado = resistencia && cicatrizadoCheckbox?.checked
                 ? ' Cicatrizado contra o perigo marcado: −1 dado.'
                 : '';
-            instrucoes.textContent = `${quantidade}d20; use o ${instrucaoDados}; some ${operador}${bonus}.${modificadorCondicao}${modificadorFerimento}${modificadorKit}${modificadorCarga}${modificadorCicatrizado}`;
+            instrucoes.textContent = `${quantidade}d20; use o ${instrucaoDados}; some ${operador}${bonus}.${detalhePericia}${modificadorCondicao}${modificadorFerimento}${modificadorKit}${modificadorCarga}${modificadorCicatrizado}`;
             if (kitField) kitField.hidden = !kitRequired;
             if (cicatrizadoField) {
                 cicatrizadoField.hidden = !resistencia;
@@ -351,13 +488,24 @@
             else alvo.selectedIndex = -1;
             atualizarInstrucao();
         }
+        document.addEventListener('click', (event) => {
+            const disparador = event.target.closest('[data-roll-trigger]');
+            if (!disparador || disparador.disabled) return;
+            tipo.value = disparador.dataset.rollType;
+            tipo.dispatchEvent(new Event('change', { bubbles: true }));
+            alvo.value = disparador.dataset.rollTarget;
+            alvo.dispatchEvent(new Event('change', { bubbles: true }));
+            rolagem.requestSubmit();
+        });
         atualizarInstrucaoRolagem = atualizarInstrucao;
         tipo.addEventListener('change', () => {
-            if (kitCheckbox) kitCheckbox.checked = false;
+            if (kitCheckbox) kitCheckbox.checked = true;
             filtrarAlvos();
         });
         alvo.addEventListener('change', () => {
-            if (kitCheckbox) kitCheckbox.checked = false;
+            if (kitCheckbox) {
+                kitCheckbox.checked = alvo.selectedOptions[0]?.dataset.kitRequired === 'true';
+            }
             atualizarInstrucao();
         });
         bonusExtra.addEventListener('input', atualizarInstrucao);
@@ -383,24 +531,28 @@
                 const dt = dtInput?.value.trim();
                 if (dt) dados.dt = Number(dt);
                 const conteudo = await enviar('rolar', dados);
-                const ordem = conteudo.ordem === 'menor' ? 'menor' : 'maior';
-                let resultado = `${conteudo.descricao}: [${conteudo.dados.join(', ')}]; ${ordem} ${conteudo.dado_escolhido} ${conteudo.bonus >= 0 ? '+' : ''}${conteudo.bonus} = ${conteudo.total}.`;
-                if (Array.isArray(conteudo.detalhamento)) {
-                    resultado += ` ${conteudo.detalhamento.join('; ')}.`;
-                }
-                if (conteudo.dt !== null) {
-                    resultado += conteudo.sucesso ? ` Sucesso contra DT ${conteudo.dt}.` : ` Não alcançou a DT ${conteudo.dt}.`;
-                }
-                resultadoRolagem.textContent = resultado;
+                const opcaoAlvo = alvo.selectedOptions[0];
+                const nomeAlvo = (tipo.value === 'atributo'
+                    ? opcaoAlvo?.dataset.attributeName
+                    : opcaoAlvo?.textContent.trim().split(' (')[0])
+                    || 'Teste';
+                const textoBonus = conteudo.bonus
+                    ? ` ${conteudo.bonus >= 0 ? '+' : '−'} ${Math.abs(conteudo.bonus)}`
+                    : '';
+                const textoDt = conteudo.dt !== null
+                    ? (conteudo.sucesso ? ` · Sucesso DT ${conteudo.dt}` : ` · Falha DT ${conteudo.dt}`)
+                    : '';
+                const equacao = `${nomeAlvo} · ${conteudo.quantidade_dados}d20${textoBonus} → `
+                    + `${conteudo.dados.join(', ')} → ${conteudo.dado_escolhido}${textoBonus} = ${conteudo.total}${textoDt}`;
+                mostrarToast(String(conteudo.total), equacao, Boolean(conteudo.dt !== null && !conteudo.sucesso));
             } catch (erro) {
-                resultadoRolagem.textContent = erro.message;
+                mostrarToast('Não rolou', erro.message, true);
             }
         });
     }
 
     const formularioDano = document.querySelector('[data-damage-form]');
-    const resultadoDano = document.querySelector('[data-damage-result]');
-    if (formularioDano && resultadoDano) {
+    if (formularioDano) {
         formularioDano.addEventListener('submit', async (event) => {
             event.preventDefault();
             try {
@@ -409,13 +561,18 @@
                     quantidade_dados: Number(dadosFormulario.get('quantidade_dados')),
                     faces: Number(dadosFormulario.get('faces')),
                     bonus: Number(dadosFormulario.get('bonus')),
-                    multiplicador_critico: Number(dadosFormulario.get('multiplicador_critico')),
+                    multiplicador_critico: 1,
                 };
                 const conteudo = await enviar('dano', dados);
-                resultadoDano.textContent = `${conteudo.descricao}: [${conteudo.dados.join(', ')}]; `
-                    + `${conteudo.bonus >= 0 ? '+' : ''}${conteudo.bonus} = ${conteudo.total}.`;
+                const textoBonus = conteudo.bonus
+                    ? ` ${conteudo.bonus >= 0 ? '+' : '−'} ${Math.abs(conteudo.bonus)}`
+                    : '';
+                mostrarToast(
+                    String(conteudo.total),
+                    `${conteudo.descricao}: [${conteudo.dados.join(', ')}]${textoBonus} = ${conteudo.total}`,
+                );
             } catch (erro) {
-                resultadoDano.textContent = erro.message;
+                mostrarToast('Não rolou', erro.message, true);
             }
         });
     }

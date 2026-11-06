@@ -60,8 +60,8 @@ a:focus-visible, button:focus-visible { outline: 3px solid #8cc4a5; outline-offs
 .resource .button { min-width: 42px; margin-right: 4px; }
 .resource-adjust-buttons { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .resource-adjust-buttons .button { min-width: 0; min-height: 44px; margin: 0; padding: 8px; }
-.resource-adjustment { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin-top: 12px; }
-.resource-adjustment label { display: grid; flex: 1; gap: 5px; }
+.resource-adjustment { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 12px; }
+.resource-adjustment label { display: grid; min-width: 0; gap: 5px; }
 .resource-adjustment input { width: 100%; min-height: 44px; padding: 8px; border: 1px solid #cbd6cd; border-radius: 5px; }
 .resource-temporary { margin-top: 12px; }
 .session-controls { display: grid; gap: 8px; margin: 16px 0; }
@@ -84,6 +84,7 @@ a:focus-visible, button:focus-visible { outline: 3px solid #8cc4a5; outline-offs
 .inventory-list { padding: 0; list-style: none; }
 .inventory-list > li { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 14px 0; border-bottom: 1px solid #e0e7e1; }
 .inventory-list > li > div:first-child { display: grid; gap: 5px; }
+.inventory-description { display: block; max-width: 100%; margin: 0; overflow-wrap: anywhere; white-space: normal; line-height: 1.55; }
 .inventory-list span { color: #65736b; }
 .inventory-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
 .inventory-actions form { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 0; }
@@ -131,7 +132,8 @@ a:focus-visible, button:focus-visible { outline: 3px solid #8cc4a5; outline-offs
     --radius-control: .6rem;
     --radius-card: .9rem;
     --control-height: 44px;
-    --motion-fast: 160ms;
+    --motion-fast: 180ms;
+    --motion-easing: cubic-bezier(.2, .65, .3, 1);
     font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif;
     color: var(--ink);
     background: var(--night);
@@ -233,7 +235,7 @@ body {
             color-mix(in srgb, #07140f 88%, var(--accent-deep)) 0%,
             color-mix(in srgb, #0b2117 82%, var(--jade)) 54%,
             color-mix(in srgb, #08170f 88%, var(--accent-deep)) 100%);
-    transition: background-color .25s ease, color .25s ease;
+    transition: background-color var(--motion-fast) var(--motion-easing), color var(--motion-fast) var(--motion-easing);
 }
 body::before {
     position: fixed;
@@ -285,7 +287,7 @@ h3 { font-size: 1.08rem; }
     color: #03150c;
     font-weight: 800;
     letter-spacing: .025em;
-    transition: transform .16s ease, filter .16s ease, border-color .16s ease;
+    transition: transform var(--motion-fast) var(--motion-easing), filter var(--motion-fast) var(--motion-easing), border-color var(--motion-fast) var(--motion-easing);
 }
 .button:hover { filter: brightness(1.12); transform: translateY(-1px); }
 .button-secondary {
@@ -415,19 +417,65 @@ input:focus, select:focus, textarea:focus { border-color: var(--jade-bright); }
 .step-list { color: var(--muted-ink); }
 .step-list [aria-current=step] { color: var(--gold-soft); }
 .review-summary { border-left-color: var(--gold); }
+.wizard-fieldset {
+    min-width: 0;
+    margin: 22px 0;
+    padding: 18px;
+    border: 1px solid var(--accent-line);
+    border-radius: .6rem;
+}
+.wizard-fieldset legend { padding: 0 8px; color: var(--gold-soft); font-weight: 750; }
+.wizard-fieldset p:last-child { margin-bottom: 0; }
 
 .sheet-layout {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+        "hero hero"
+        "tabs tabs"
+        "delete delete"
+        "status progress"
+        "pending pending"
+        "inventory skills"
+        "track abilities"
+        "conditions wounds"
+        "roll damage"
+        "notes notes";
     align-items: stretch;
     gap: clamp(14px, 2vw, 22px);
     padding-bottom: 70px;
 }
-.page main.sheet-layout > section { min-width: 0; margin: 0; }
-.sheet-status, .sheet-hero, .sheet-tabs { grid-column: 1 / -1; }
-.sheet-skills, .sheet-inventory, .sheet-conditions, #proficiencias,
-#habilidades { grid-column: 1 / -1; }
-.sheet-layout > .sheet-roll-panel { grid-column: span 1; }
+.page main.sheet-layout > section, .page main.sheet-layout > details { min-width: 0; margin: 0; }
+.sheet-hero { grid-area: hero; }
+.sheet-tabs { grid-area: tabs; }
+.sheet-layout > .delete-confirm { grid-area: delete; }
+.sheet-status { grid-area: status; }
+#progressao { grid-area: progress; }
+.sheet-pending { grid-area: pending; }
+.sheet-pending { position: relative; }
+.sheet-pending > h2 { padding-right: 36px; }
+.sheet-pending.is-leaving { animation: toast-exit var(--motion-fast) var(--motion-easing) both; }
+.sheet-pending[hidden] { display: none; }
+.stat-list .defense-card dt {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    padding: 8px 11px;
+    border-bottom: 1px solid var(--accent-line);
+    background: linear-gradient(110deg, color-mix(in srgb, var(--jade) 24%, var(--panel-raised)), var(--panel-raised));
+    color: var(--jade-bright);
+    font-size: 1rem;
+    font-weight: 800;
+}
+.sheet-inventory { grid-area: inventory; }
+.sheet-skills { grid-area: skills; }
+#proficiencias { grid-area: track; }
+#habilidades { grid-area: abilities; }
+.sheet-conditions { grid-area: conditions; }
+#ferimentos { grid-area: wounds; }
+.sheet-layout > .roll-advanced-panel { grid-area: roll; }
+.sheet-layout > .sheet-damage-panel { grid-area: damage; }
+.sheet-notes { grid-area: notes; }
 .sheet-hero {
     position: relative;
     display: flex;
@@ -483,10 +531,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--jade-bright); }
 }
 .sheet-seal .die-icon { width: 82px; height: 82px; }
 .sheet-tabs { margin-bottom: 24px; }
+.track-upcoming { margin-top: 16px; border-top: 1px solid var(--accent-line); }
+.track-upcoming summary { padding: 12px 0; color: var(--gold-soft); cursor: pointer; font-weight: 750; }
+.track-upcoming[open] summary { border-bottom: 1px solid var(--accent-line); }
 .sheet-status > p { margin: 8px 0; }
 .sheet-overview {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
     margin: 18px 0 22px;
 }
@@ -510,7 +561,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--jade-bright); }
 .sheet-overview small { color: var(--muted-ink); line-height: 1.4; }
 .sheet-skills .skill-list {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     gap: 7px 18px;
     margin: 0;
     padding: 0;
@@ -523,8 +574,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--jade-bright); }
     justify-content: space-between;
     gap: 12px;
     padding: 10px 12px;
-    border: 1px solid #286041;
-    background: linear-gradient(90deg, #123522, #0a1c12);
+    border: 1px solid var(--accent-line);
+    border-radius: 6px;
+    background: linear-gradient(145deg, var(--panel-raised), var(--panel));
+    transition: border-color var(--motion-fast) var(--motion-easing), box-shadow var(--motion-fast) var(--motion-easing);
 }
 .skill-name { color: var(--ink); font-weight: 700; }
 .skill-grade {
@@ -539,7 +592,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--jade-bright); }
 .skill-empty { grid-column: 1 / -1; color: var(--muted-ink); }
 .sheet-inventory .inventory-list {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
 }
 .sheet-inventory .inventory-list > li {
@@ -556,8 +609,22 @@ input:focus, select:focus, textarea:focus { border-color: var(--jade-bright); }
 .sheet-inventory .inventory-list > li > div:first-child strong,
 .sheet-inventory .inventory-list span,
 .sheet-inventory .inventory-list p { color: #04180c; }
-.sheet-inventory .inventory-list > li > div:first-child { gap: 7px; }
-.sheet-inventory .inventory-actions { width: 100%; }
+.sheet-inventory .inventory-item-main { display: grid; min-width: 0; gap: 12px; }
+.inventory-item-heading { display: flex; min-width: 0; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.inventory-item-heading strong { overflow-wrap: anywhere; }
+.inventory-item-heading > span { flex: 0 0 auto; font-size: 1.05rem; font-weight: 850; }
+.inventory-item-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.inventory-item-meta > div { min-width: 0; }
+.inventory-item-meta dt { font-size: .72rem; font-weight: 750; text-transform: uppercase; opacity: .75; }
+.inventory-item-meta dd { margin: 3px 0 0; font-weight: 700; overflow-wrap: anywhere; }
+.sheet-inventory .inventory-item-main p { margin: 0; overflow-wrap: anywhere; }
+.sheet-notes form { display: grid; max-width: 860px; gap: 12px; }
+.sheet-notes form p { display: grid; gap: 7px; margin: 0; }
+.sheet-notes textarea { width: 100%; min-height: 220px; resize: vertical; line-height: 1.55; }
+.sheet-notes form button { justify-self: start; }
+.sheet-inventory .inventory-actions { display: grid; width: 100%; gap: 8px; }
+.sheet-inventory .inventory-actions form { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.sheet-inventory .inventory-actions label { flex: 1 1 110px; }
 .sheet-inventory .button-secondary { border-color: var(--line); background: var(--night); color: var(--ink); }
 .sheet-conditions [data-active-condition] {
     display: flex;
@@ -589,7 +656,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--jade-bright); }
     background: #0a1c12;
     color: var(--muted-ink);
     cursor: pointer;
-    transition: background .16s ease, color .16s ease, transform .16s ease;
+    transition: background var(--motion-fast) var(--motion-easing), color var(--motion-fast) var(--motion-easing), transform var(--motion-fast) var(--motion-easing);
 }
 .die-choice:hover { transform: translateY(-2px); color: var(--jade-bright); }
 .die-choice[aria-pressed="true"] {
@@ -602,29 +669,40 @@ input:focus, select:focus, textarea:focus { border-color: var(--jade-bright); }
     display: block;
     width: 32px;
     height: 32px;
-    overflow: visible;
-    fill: none;
-    stroke: currentColor;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-width: 3;
+    object-fit: contain;
     filter: drop-shadow(0 2px 3px #0005);
 }
-.die-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 
 .session-mode { font-size: 1.15rem; }
 .session-mode :focus-visible { outline-width: 4px; }
 
 @media (max-width: 760px) {
     .page { width: min(100% - 28px, 1180px); }
-    .sheet-layout { grid-template-columns: minmax(0, 1fr); gap: 14px; }
-    .sheet-skills, .sheet-inventory, .sheet-conditions, #proficiencias,
-    #habilidades, .sheet-layout > .sheet-roll-panel { grid-column: 1; }
+    .sheet-layout {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+            "hero"
+            "tabs"
+            "delete"
+            "status"
+            "progress"
+            "pending"
+            "inventory"
+            "skills"
+            "track"
+            "abilities"
+            "conditions"
+            "wounds"
+            "roll"
+            "damage"
+            "notes";
+        gap: 14px;
+    }
     .sheet-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .sheet-hero { min-height: 190px; padding: 26px; }
     .sheet-seal { min-width: 100px; }
     .sheet-seal .die-icon { width: 62px; height: 62px; }
-    .sheet-inventory .inventory-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .sheet-inventory .inventory-list { grid-template-columns: minmax(0, 1fr); }
     .die-picker-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .page main > section { margin: 16px 0; padding: 20px; }
 }
@@ -696,7 +774,7 @@ body {
     line-height: 1.15;
     text-align: center;
     text-decoration: none;
-    transition: transform .18s ease, box-shadow .18s ease, filter .18s ease, border-color .18s ease;
+    transition: transform var(--motion-fast) var(--motion-easing), box-shadow var(--motion-fast) var(--motion-easing), filter var(--motion-fast) var(--motion-easing), border-color var(--motion-fast) var(--motion-easing);
 }
 .button-secondary {
     border-color: var(--line);
@@ -705,7 +783,7 @@ body {
     color: var(--jade-bright);
 }
 .button:disabled, button:disabled { cursor: not-allowed; opacity: .58; }
-a:not(.button) { text-decoration-thickness: .08em; transition: color .18s ease; }
+a:not(.button) { text-decoration-thickness: .08em; transition: color var(--motion-fast) var(--motion-easing); }
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 select, textarea {
     min-height: 44px;
@@ -716,7 +794,7 @@ select, textarea {
     color: var(--ink);
     font-size: 1rem;
     line-height: 1.4;
-    transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+    transition: border-color var(--motion-fast) var(--motion-easing), box-shadow var(--motion-fast) var(--motion-easing), background-color var(--motion-fast) var(--motion-easing);
 }
 textarea { min-height: 100px; }
 input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color: var(--jade); }
@@ -741,13 +819,17 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .resource output { color: var(--jade-bright); font-size: clamp(1.35rem, 2.5vw, 1.7rem); }
 .resource-adjust-buttons .button { min-width: 44px; padding-inline: .5rem; }
 .resource-adjustment input, .inventory-actions input, .inventory-actions select { background: var(--night); }
+.sheet-status .resource-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); }
+.sheet-status .resource { min-width: 0; }
+.sheet-status .resource-adjust-buttons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sheet-status .resource-adjust-buttons .button { width: 100%; padding-inline: 8px; }
 .tabs {
     border-color: var(--accent-line);
     border-radius: .65rem;
     background: color-mix(in srgb, var(--panel) 86%, var(--jade));
     box-shadow: 0 8px 24px #020b0730;
 }
-.tabs a { border-radius: .4rem; transition: color .18s ease, background-color .18s ease, border-color .18s ease; }
+.tabs a { border-radius: .4rem; transition: color var(--motion-fast) var(--motion-easing), background-color var(--motion-fast) var(--motion-easing), border-color var(--motion-fast) var(--motion-easing); }
 .tabs a:hover, .tabs a:focus-visible { background: var(--accent-halo); color: var(--jade-bright); }
 .page main > section > h2::after { background: linear-gradient(90deg, var(--accent-line), transparent); }
 .sheet-hero {
@@ -763,7 +845,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     border-color: var(--accent-line);
     border-radius: .45rem;
     background: linear-gradient(100deg, color-mix(in srgb, var(--panel-raised) 90%, var(--jade)), var(--panel));
-    transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+    transition: transform var(--motion-fast) var(--motion-easing), border-color var(--motion-fast) var(--motion-easing), box-shadow var(--motion-fast) var(--motion-easing);
 }
 .skill-grade { color: var(--jade-bright); }
 .sheet-inventory .inventory-list > li {
@@ -771,7 +853,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     border-radius: .7rem;
     background: linear-gradient(145deg, color-mix(in srgb, var(--jade) 74%, white), var(--accent-deep));
     color: var(--accent-on);
-    transition: transform .2s ease, box-shadow .2s ease, filter .2s ease;
+    transition: transform var(--motion-fast) var(--motion-easing), box-shadow var(--motion-fast) var(--motion-easing), filter var(--motion-fast) var(--motion-easing);
 }
 .sheet-inventory .inventory-list > li > div:first-child strong,
 .sheet-inventory .inventory-list span,
@@ -790,8 +872,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     background: linear-gradient(145deg, color-mix(in srgb, var(--panel-raised) 88%, var(--jade)), color-mix(in srgb, var(--panel) 94%, var(--accent-deep)));
     font-size: .9rem;
     font-weight: 750;
-    transition: transform .18s ease, color .18s ease, border-color .18s ease,
-        background-color .18s ease, box-shadow .18s ease;
+    transition: transform var(--motion-fast) var(--motion-easing), color var(--motion-fast) var(--motion-easing), border-color var(--motion-fast) var(--motion-easing),
+        background-color var(--motion-fast) var(--motion-easing), box-shadow var(--motion-fast) var(--motion-easing);
 }
 .die-icon { width: 44px; height: 44px; stroke-width: 2.7; }
 .die-choice[aria-pressed="true"] { border-color: var(--jade); }
@@ -803,6 +885,112 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .message, .review-summary, .roll-instructions { border-radius: .55rem; }
 .session-mode { font-size: 1.15rem; }
 .session-mode :focus-visible { outline-width: 4px; }
+
+.stat-list .attribute-roll-card {
+    display: grid;
+    min-width: 0;
+    gap: 0;
+    overflow: hidden;
+    padding: 0;
+    border: 1px solid var(--accent-line);
+    border-radius: 6px;
+    background: linear-gradient(145deg, var(--panel-raised), var(--panel));
+}
+.attribute-roll {
+    display: flex;
+    width: 100%;
+    min-height: 44px;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 11px;
+    border: 0;
+    border-bottom: 1px solid var(--accent-line);
+    border-radius: 0;
+    background: linear-gradient(110deg, color-mix(in srgb, var(--jade) 24%, var(--panel-raised)), var(--panel-raised));
+    color: var(--jade-bright);
+    font-size: 1rem;
+    font-weight: 800;
+    text-align: left;
+    cursor: pointer;
+}
+.attribute-roll::after, .skill-roll::after {
+    flex: 0 0 auto;
+    color: var(--gold-soft);
+    content: 'Rolar';
+    font-size: .72rem;
+    font-weight: 800;
+}
+.attribute-roll-card dd { color: var(--gold-soft); font-size: 1.6rem; font-weight: 850; }
+.stat-list .attribute-roll-card dt, .stat-list .attribute-roll-card dd { padding: 0; border: 0; }
+.stat-list .attribute-roll-card dd { padding: 4px 12px 10px; }
+.attribute-roll-card:focus-within, .attribute-roll-card:hover {
+    border-color: var(--jade-bright);
+    box-shadow: 0 0 0 2px var(--accent-halo);
+}
+.attribute-roll:hover, .skill-roll:hover { color: var(--gold-soft); }
+.skill-list li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 5px 10px;
+}
+.skill-roll {
+    display: flex;
+    min-width: 0;
+    min-height: 44px;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    border: 1px solid var(--accent-line);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--panel-raised) 72%, var(--jade));
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.skill-list li:focus-within, .skill-list li:hover {
+    border-color: var(--jade-bright);
+    box-shadow: 0 0 0 2px var(--accent-halo);
+}
+.skill-roll:disabled { cursor: not-allowed; opacity: .58; }
+.skill-pool { flex: 0 0 auto; color: var(--gold-soft); font-weight: 800; }
+.skill-name { min-width: 0; }
+.skill-grade { grid-column: 2; grid-row: 1; }
+.skill-breakdown, .skill-adjustment { grid-column: 1 / -1; }
+.skill-breakdown { color: var(--muted-ink); line-height: 1.4; }
+.skill-adjustment summary {
+    display: inline-flex;
+    min-height: 36px;
+    align-items: center;
+    width: fit-content;
+    padding: 6px 10px;
+    border: 1px solid var(--accent-line);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--panel-raised) 80%, var(--jade));
+    color: var(--jade-bright);
+    cursor: pointer;
+    font-size: .82rem;
+    font-weight: 750;
+}
+.skill-adjustment form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding-top: 8px; }
+.skill-adjustment form label { display: grid; gap: 4px; color: var(--muted-ink); font-size: .82rem; }
+.skill-adjustment form button { grid-column: 1 / -1; justify-self: start; }
+.ability-manager { margin: 14px 0 20px; }
+.ability-manager > summary { display: inline-flex; cursor: pointer; }
+.ability-manager-options { display: grid; gap: 18px; margin-top: 16px; }
+.ability-manager-options h3 { margin: 0; color: var(--gold-soft); }
+.ability-manager-options .ability-form { margin: 0; padding: 14px; border: 1px solid var(--accent-line); border-radius: 6px; }
+.ability-list > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 14px; align-items: start; }
+.ability-list > li > div:first-child { min-width: 0; }
+.ability-list > li > .ability-edit { grid-column: 2; }
+.ability-list > li > form { grid-column: 2; }
+.ability-edit summary { color: var(--jade-bright); cursor: pointer; font-weight: 700; }
+.ability-edit[open] { grid-column: 1 / -1 !important; }
+.ability-edit .ability-form { margin-top: 10px; }
+.roll-advanced-panel { min-width: 0; padding: 14px; border: 1px solid var(--accent-line); border-radius: 6px; }
+.roll-advanced-panel > h2 { margin-top: 0; }
 
 .appearance-panel {
     position: fixed;
@@ -829,7 +1017,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     font-size: .94rem;
     font-weight: 750;
     list-style: none;
-    transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+    transition: transform var(--motion-fast) var(--motion-easing), border-color var(--motion-fast) var(--motion-easing), box-shadow var(--motion-fast) var(--motion-easing);
 }
 .appearance-panel > summary::-webkit-details-marker { display: none; }
 .appearance-mark { font-size: 1.2rem; line-height: 1; }
@@ -975,7 +1163,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     background: linear-gradient(120deg, color-mix(in srgb, var(--panel-raised) 86%, var(--jade)), var(--panel));
     color: var(--ink);
     cursor: pointer;
-    transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease;
+    transition: border-color var(--motion-fast) var(--motion-easing), background-color var(--motion-fast) var(--motion-easing), box-shadow var(--motion-fast) var(--motion-easing);
 }
 .checklist input[type="checkbox"], .checklist-control input[type="checkbox"] {
     width: 18px;
@@ -1088,6 +1276,37 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 .master-dashboard > main > section > form > label { color: var(--muted-ink); }
 .master-dashboard .master-summary { margin-bottom: 0; }
+.master-dashboard .sheet-list > li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+}
+.master-dashboard .master-sheet-name {
+    width: fit-content;
+    font-size: 1.3rem;
+    line-height: 1.3;
+}
+.master-dashboard .master-sheet-resources {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+    gap: 8px;
+}
+.master-dashboard .master-sheet-resource {
+    display: grid;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--line);
+}
+.master-dashboard .master-sheet-resource > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.master-dashboard .master-sheet-resource .button {
+    min-width: 44px;
+    min-height: 40px;
+    padding: 6px 10px;
+}
 .master-dashboard .master-roll-list { padding-left: 0; list-style: none; }
 .master-dashboard .master-roll-list li { min-width: 0; overflow-wrap: anywhere; }
 
@@ -1158,6 +1377,82 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     font-weight: 700;
 }
 .roll-result:empty, [data-damage-result]:empty { display: none; }
+.roll-toast {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 1100;
+    display: grid;
+    width: min(390px, calc(100vw - 32px));
+    gap: 5px;
+    padding: 18px 48px 16px 18px;
+    border: 1px solid var(--jade-bright);
+    border-radius: 8px;
+    background: linear-gradient(145deg, var(--panel-raised), var(--night));
+    color: var(--ink);
+    box-shadow: 0 16px 42px #0009, 0 0 0 3px var(--accent-halo);
+    animation: toast-enter var(--motion-fast) var(--motion-easing) both;
+}
+.roll-toast[hidden] { display: none; }
+.roll-toast.is-leaving { animation: toast-exit var(--motion-fast) var(--motion-easing) both; }
+.roll-toast-total { color: var(--gold-soft); font-size: 2.5rem; line-height: 1.05; }
+.roll-toast-equation { color: var(--ink); font-size: .96rem; line-height: 1.45; overflow-wrap: anywhere; }
+.roll-toast[data-error="true"] .roll-toast-total { color: var(--danger); font-size: 1.2rem; }
+.roll-toast-close, .subpanel-close {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    min-height: 30px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--accent-line);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--panel-raised) 90%, var(--jade));
+    color: var(--ink);
+    font-size: 1.15rem;
+    line-height: 1;
+    cursor: pointer;
+}
+.roll-toast-close { position: absolute; top: 10px; right: 10px; }
+details.skill-adjustment, details.ability-manager, details.ability-edit,
+details.roll-advanced-panel, details.roll-advanced, details.track-upcoming,
+details.delete-confirm { position: relative; }
+.subpanel-close { position: absolute; top: 7px; right: 7px; z-index: 2; }
+details[data-closeable] > summary {
+    position: relative;
+    padding-right: 68px;
+}
+details[data-closeable] > summary::-webkit-details-marker { display: none; }
+details[data-closeable] > summary::marker { content: ''; }
+details[data-closeable] > summary::after {
+    position: absolute;
+    top: 50%;
+    right: 44px;
+    color: var(--gold-soft);
+    content: '\25BE';
+    font-size: 1rem;
+    transform: translateY(-50%);
+    transition: transform var(--motion-fast) var(--motion-easing);
+}
+details[data-closeable][open] > summary::after { transform: translateY(-50%) rotate(180deg); }
+.subpanel-page { position: relative; }
+.subpanel-page > .subpanel-close { top: 10px; right: 10px; }
+@keyframes toast-enter {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-exit {
+    to { opacity: 0; transform: translateY(8px); }
+}
+details.is-closing > :not(summary) { animation: panel-exit var(--motion-fast) var(--motion-easing) both; }
+details[open]:not(.is-closing) > :not(summary) { animation: panel-enter var(--motion-fast) var(--motion-easing) both; }
+@keyframes panel-enter {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes panel-exit {
+    to { opacity: 0; transform: translateY(-4px); }
+}
 @media (hover: hover) {
     .checklist label:hover, .checklist-control:hover, .table-roster li:hover, .ability-list > li:hover {
         border-color: var(--jade);
@@ -1180,10 +1475,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 
 a, button, input, select, textarea, summary {
     transition:
-        color var(--motion-fast) ease,
-        background-color var(--motion-fast) ease,
-        border-color var(--motion-fast) ease,
-        box-shadow var(--motion-fast) ease;
+        color var(--motion-fast) var(--motion-easing),
+        background-color var(--motion-fast) var(--motion-easing),
+        border-color var(--motion-fast) var(--motion-easing),
+        box-shadow var(--motion-fast) var(--motion-easing),
+        transform var(--motion-fast) var(--motion-easing),
+        opacity var(--motion-fast) var(--motion-easing);
 }
 a:not(.button) { text-decoration-thickness: .08em; }
 a:not(.button):hover { text-decoration-thickness: .13em; }
@@ -1217,14 +1514,14 @@ input[type="checkbox"], input[type="radio"] {
 .message, .roll-instructions, .resource-overflow-hint {
     border-radius: var(--radius-control);
 }
-body { animation: page-enter 220ms ease-out both; }
+body { animation: page-enter var(--motion-fast) var(--motion-easing) both; }
 @keyframes page-enter {
     from { opacity: .82; }
     to { opacity: 1; }
 }
 @view-transition { navigation: auto; }
-::view-transition-old(root) { animation: page-leave 140ms ease-in both; }
-::view-transition-new(root) { animation: page-enter 220ms ease-out both; }
+::view-transition-old(root) { animation: page-leave var(--motion-fast) var(--motion-easing) both; }
+::view-transition-new(root) { animation: page-enter var(--motion-fast) var(--motion-easing) both; }
 @keyframes page-leave {
     to { opacity: .82; }
 }

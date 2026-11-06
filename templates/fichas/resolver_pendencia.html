@@ -3,7 +3,8 @@
 {% block title %}Resolver escolha · MONOTOFOBIA{% endblock %}
 
 {% block content %}
-<main class="page form-page">
+<main class="page form-page subpanel-page">
+    <a class="subpanel-close" href="{% url 'fichas:detalhe' ficha.pk %}" aria-label="Fechar escolha">×</a>
     <a href="{% url 'fichas:detalhe' ficha.pk %}">Voltar à ficha</a>
     <h1>Resolver escolha</h1>
     <p>{{ pendencia.descricao }} <span class="muted">{{ pendencia.fonte }}</span></p>

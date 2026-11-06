@@ -65,7 +65,7 @@
                                 Ação completa: {% if participante.acao_completa_usada %}usada{% else %}disponível se ações livres{% endif %} ·
                                 Reação defensiva: {% if participante.reacao_defensiva_usada %}usada nesta rodada{% else %}disponível{% endif %}</p>
                             {% if participante.ficha_id %}
-                                {% if modo_recursos == 'padrao' and participante.limite_pe_turno %}
+                                {% if participante.modo_recursos == 'padrao' and participante.limite_pe_turno %}
                                     <p>PE gastos neste turno: {{ participante.pe_gasto_turno }}/{{ participante.limite_pe_turno }}</p>
                                     <form method="post" action="{% url 'fichas:gastar_recurso_combate' encontro.pk participante.pk %}">
                                         {% csrf_token %}
@@ -74,7 +74,7 @@
                                         <input id="spend-pe-{{ participante.pk }}" type="number" name="quantidade" min="1" max="{{ participante.limite_pe_turno }}" required>
                                         <button class="button button-secondary" type="submit">Registrar gasto de PE</button>
                                     </form>
-                                {% elif modo_recursos == 'sem_sanidade' and participante.limite_pd_turno %}
+                                {% elif participante.modo_recursos == 'sem_sanidade' and participante.limite_pd_turno %}
                                     <p>PD gastos neste turno: {{ participante.pd_gasto_turno }}/{{ participante.limite_pd_turno }}</p>
                                     <form method="post" action="{% url 'fichas:gastar_recurso_combate' encontro.pk participante.pk %}">
                                         {% csrf_token %}

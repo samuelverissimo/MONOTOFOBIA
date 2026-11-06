@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Criar personagem | MONOTOFOBIA{% endblock %}
 
@@ -6,28 +7,36 @@
 <main class="page form-page">
     <a href="{% url 'home' %}">Voltar às fichas</a>
     <h1>Criação de personagem</h1>
-    <nav aria-label="Etapas da criação">
-        <ol class="step-list">
-            {% for nome in etapas %}
-                <li{% if forloop.counter == etapa %} aria-current="step"{% endif %}>{{ forloop.counter }}. {{ nome|capfirst }}</li>
-            {% endfor %}
-        </ol>
-    </nav>
     {% if livre %}<p>Criação livre de mestre</p>{% endif %}
-    {% if revisao %}
-        <section class="review-summary" aria-label="Resumo da ficha">
-            <h2>{{ revisao.nome }}</h2>
-            <p>{{ revisao.conceito }}</p>
-            <p>{{ revisao.origem_nome }} · {{ revisao.classe_nome }}</p>
-            <p>{{ revisao.progressao_nome }}</p>
-            <p>Atributos: AGI {{ revisao.atributos.agilidade }}, FOR {{ revisao.atributos.forca }}, INT {{ revisao.atributos.intelecto }}, PRE {{ revisao.atributos.presenca }}, VIG {{ revisao.atributos.vigor }}</p>
-        </section>
-    {% endif %}
     <form method="post">
         {% csrf_token %}
-        {{ form.as_p }}
-        {% if etapa > 1 %}<button class="button button-secondary" type="submit" name="voltar" value="1">Voltar</button>{% endif %}
-        <button class="button" type="submit">{% if etapa == 6 %}Criar ficha{% else %}Continuar{% endif %}</button>
+        <fieldset class="wizard-fieldset">
+            <legend>Conceito</legend>
+            {{ form.forms.conceito.as_p }}
+        </fieldset>
+        <fieldset class="wizard-fieldset">
+            <legend>Origem</legend>
+            {{ form.forms.origem.as_p }}
+        </fieldset>
+        <fieldset class="wizard-fieldset">
+            <legend>Classe</legend>
+            {{ form.forms.classe.as_p }}
+        </fieldset>
+        <fieldset class="wizard-fieldset">
+            <legend>Atributos</legend>
+            {{ form.forms.atributos.as_p }}
+        </fieldset>
+        <fieldset class="wizard-fieldset">
+            <legend>Perícias iniciais</legend>
+            {{ form.forms.pericias.as_p }}
+            <p class="muted" data-pericia-choice-count data-free-creation="{{ livre|yesno:'true,false' }}" aria-live="polite"></p>
+            <p>Todas as escolhas começam Treinadas. O grau e os modificadores podem ser editados na ficha.</p>
+        </fieldset>
+        <button class="button" type="submit">Criar ficha</button>
     </form>
 </main>
+{% endblock %}
+
+{% block scripts %}
+    <script src="{% static 'js/wizard.js' %}?v=2" defer></script>
 {% endblock %}

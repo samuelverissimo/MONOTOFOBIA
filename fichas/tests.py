@@ -14,11 +14,12 @@ from django.utils.crypto import get_random_string
 
 from core.models import AmeacaMesa, InscricaoMesa, Mesa
 from fichas.efeitos import explicar_teste
-from fichas.forms import CriacaoInicialForm
+from fichas.forms import ConfiguracaoFichaForm, CriacaoInicialForm
 from fichas.models import (
     Atributo,
     Classe,
     Condicao,
+    ConfiguracaoFicha,
     ConfiguracaoMesa,
     EncontroCombate,
     Ficha,
@@ -43,6 +44,7 @@ from fichas.models import (
     Trilha,
 )
 from fichas.permissions import fichas_visiveis_para, is_mestre, pode_editar_ficha, pode_ver_ficha
+from fichas.pre_requisitos import poder_atende_pre_requisitos, validar_pre_requisitos
 from fichas.regras import (
     avaliar_teste_fisico,
     avaliar_dano_fisico,
@@ -57,6 +59,7 @@ from fichas.regras import (
     limite_pe_por_turno,
     modificadores_condicoes,
     nex_equivalente_por_nivel,
+    nivel_equivalente_por_nex,
     pericias_treinadas_disponiveis,
     pendencias_ao_subir_estagio,
     pendencias_ao_subir_nex,
@@ -71,6 +74,8 @@ from fichas.forms import (
     FichaEdicaoForm,
     FichaStatusForm,
     ItemInventarioForm,
+    PericiasFichaForm,
+    ProgressaoInicialForm,
     RegistroPrestigioForm,
 )
 
@@ -86,12 +91,31 @@ class FixedDice:
 
 
 class RegrasTests(SimpleTestCase):
+    def test_elemental_and_alternative_skill_prerequisites_are_structured(self):
+        self.assertEqual(validar_pre_requisitos({
+            'poderes_elemento_min': {'morte': 2},
+            'pericias_treinadas_uma_de': ['luta', 'pontaria'],
+        }), {
+            'poderes_elemento_min': {'morte': 2},
+            'pericias_treinadas_uma_de': ['luta', 'pontaria'],
+        })
+        with self.assertRaises(ValidationError):
+            validar_pre_requisitos({'poderes_elemento_min': {'medo': True}})
+        with self.assertRaises(ValidationError):
+            validar_pre_requisitos({'pericias_treinadas_uma_de': ['luta', 'luta']})
+
     def test_experience_level_maps_to_class_progression(self):
         self.assertEqual(nex_equivalente_por_nivel(1), 5)
         self.assertEqual(nex_equivalente_por_nivel(19), 95)
         self.assertEqual(nex_equivalente_por_nivel(20), 99)
         with self.assertRaises(ValueError):
             nex_equivalente_por_nivel(0)
+        self.assertEqual(
+            [nivel_equivalente_por_nex(nex) for nex in (10, 40, 65, 99)],
+            [2, 8, 13, 20],
+        )
+        with self.assertRaises(ValueError):
+            nivel_equivalente_por_nex(98)
 
     def test_combatente_pv_nex_99_vigor_3(self):
         self.assertEqual(calcular_pv_max('combatente', vigor=3, nex=99), 156)
@@ -189,6 +213,14 @@ class RegrasTests(SimpleTestCase):
         self.assertEqual(limite_pe_por_turno(5), 1)
         self.assertEqual(limite_pe_por_turno(99), 20)
         self.assertEqual(limite_pe_por_turno(99, classe='sobrevivente'), 1)
+        self.assertEqual(
+            [item['tipo'] for item in pendencias_ao_subir_nex('combatente', 5, 10)],
+            ['trilha'],
+        )
+        self.assertEqual(
+            [item['tipo'] for item in pendencias_ao_subir_nex('combatente', 10, 15)],
+            ['poder'],
+        )
         pendencias = pendencias_ao_subir_nex('especialista', 5, 20, intelecto=3)
         self.assertEqual([item['tipo'] for item in pendencias], ['trilha', 'poder', 'atributo'])
         with self.assertRaises(ValueError):
@@ -198,7 +230,7 @@ class RegrasTests(SimpleTestCase):
         pendencias = pendencias_ao_subir_estagio(1, 5)
         self.assertEqual(
             [pendencia['tipo'] for pendencia in pendencias],
-            ['trilha', 'poder', 'atributo', 'poder', 'cicatrizado'],
+            ['trilha', 'atributo', 'cicatrizado'],
         )
         self.assertTrue(all(pendencia['fonte'] == 'SaH p.31' for pendencia in pendencias))
         with self.assertRaises(ValueError):
@@ -248,7 +280,31 @@ class RegrasTests(SimpleTestCase):
             avaliar_dano_fisico(1, 6, [7])
 
 
+class ProgressaoInicialFormTests(TestCase):
+    def test_initial_progression_form_only_shows_the_table_mode(self):
+        nex = ProgressaoInicialForm(mesa=ConfiguracaoMesa(sistema_progressao='nex'))
+        self.assertEqual(set(nex.fields), {'nex_inicial'})
+        self.assertEqual(nex.fields['nex_inicial'].initial, '5')
+
+        level = ProgressaoInicialForm(
+            mesa=ConfiguracaoMesa(sistema_progressao='nivel_nex'),
+        )
+        self.assertEqual(set(level.fields), {'nivel_inicial', 'nex_paranormal'})
+        self.assertEqual(level.fields['nivel_inicial'].initial, '1')
+        self.assertEqual(level.fields['nex_paranormal'].initial, '0')
+
+        rank = ProgressaoInicialForm(mesa=ConfiguracaoMesa(sistema_progressao='patentes'))
+        self.assertEqual(set(rank.fields), {'patente_inicial'})
+        self.assertTrue(rank.fields['patente_inicial'].required)
+        patente = Patente.objects.create(
+            nome='Recruta', slug='recruta', fonte='teste', resumo='', credito='I',
+        )
+        rank = ProgressaoInicialForm(mesa=ConfiguracaoMesa(sistema_progressao='patentes'))
+        self.assertEqual(rank.fields['patente_inicial'].initial, patente.pk)
+
+
 class FichaWizardFormTests(SimpleTestCase):
+
     def test_attribute_form_accepts_both_initial_budgets_before_class_step(self):
         regular = {
             'agilidade': 2,
@@ -284,6 +340,13 @@ class FichaWizardFormTests(SimpleTestCase):
         self.assertNotIn('status', jogador)
         self.assertNotIn('nex', jogador)
 
+    def test_elemental_affinity_requires_nex_equivalent_50(self):
+        ficha = Ficha(nex=45)
+        dados = {'nome': 'Agente', 'versao': 1, 'afinidade_elemento': 'morte'}
+        self.assertFalse(FichaEdicaoForm(dados, mestre=False, ficha=ficha).is_valid())
+        ficha.nex = 50
+        self.assertTrue(FichaEdicaoForm(dados, mestre=False, ficha=ficha).is_valid())
+
 
 class FichaInventarioFormTests(SimpleTestCase):
     def test_inventory_form_accepts_only_known_categories_states_and_bounds(self):
@@ -292,6 +355,7 @@ class FichaInventarioFormTests(SimpleTestCase):
             'quantidade': 2, 'estado': 'guardado', 'notas': '',
         }
         self.assertTrue(ItemInventarioForm(dados).is_valid())
+        self.assertEqual(ItemInventarioForm().fields['notas'].label, 'Descrição')
         self.assertFalse(ItemInventarioForm({**dados, 'categoria': 'V'}).is_valid())
         self.assertFalse(ItemInventarioForm({**dados, 'espacos': -1}).is_valid())
         self.assertFalse(ItemInventarioForm({**dados, 'quantidade': 0}).is_valid())
@@ -316,6 +380,18 @@ class ConfiguracaoMesaFormTests(SimpleTestCase):
         self.assertTrue(ConfiguracaoMesaForm({
             **dados, 'modo_recursos': 'sem_sanidade',
             'sistema_progressao': 'patentes',
+        }).is_valid())
+
+    def test_standalone_patent_progression_requires_no_sanity_mode(self):
+        dados = {
+            'versao': 1,
+            'modo_recursos': 'sem_sanidade',
+            'sistema_progressao': 'patentes',
+            'numero_sessao': 1,
+        }
+        self.assertTrue(ConfiguracaoFichaForm(dados).is_valid())
+        self.assertFalse(ConfiguracaoFichaForm({
+            **dados, 'modo_recursos': 'padrao',
         }).is_valid())
 
     def test_prestige_form_restricts_solution_and_clue_quantities(self):
@@ -385,6 +461,217 @@ class FichaViewsTests(TestCase):
             nome=slug.capitalize(), slug=slug, fonte='OPRPG', resumo='', atributo=atributo,
         )
 
+    def test_detail_renders_track_milestones_and_power_affinity(self):
+        trilha = Trilha.objects.create(
+            nome='Trilha de teste', slug='trilha-de-teste', fonte='teste', resumo='',
+            classe=self.classe, pre_requisitos={'classe_slug': 'combatente'},
+            habilidades=[{'nex': 10, 'nome': 'Primeiro marco', 'resumo': 'Resumo da habilidade.'}],
+        )
+        self.ficha.trilha = trilha
+        self.ficha.afinidade_elemento = 'morte'
+        self.ficha.save(update_fields=('trilha', 'afinidade_elemento'))
+        poder = Poder.objects.create(
+            nome='Poder de teste', slug='poder-de-teste', fonte='teste', resumo='Resumo base.',
+            tipo='paranormal', elemento='morte', afinidade_resumo='Efeito por repetição.',
+        )
+        FichaPoder.objects.create(ficha=self.ficha, poder=poder)
+        self.client.force_login(self.owner)
+
+        response = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+
+        self.assertContains(response, 'Primeiro marco')
+        self.assertContains(response, 'NEX 10%')
+        self.assertContains(response, 'Afinidade elemental:')
+        self.assertContains(response, 'Efeito por repetição.')
+
+    def test_initial_skill_picker_is_one_list_and_excludes_origin_skills(self):
+        form = PericiasFichaForm(
+            classe=self.classe,
+            origem=self.origem,
+            intelecto=0,
+        )
+
+        self.assertEqual(set(form.fields), {'pericias_escolhidas'})
+        self.assertEqual(form.quantidade_escolhas, 2)
+        opcoes = set(form.fields['pericias_escolhidas'].queryset.values_list('pk', flat=True))
+        self.assertNotIn(self.fortitude.pk, opcoes)
+        self.assertIn(self.luta.pk, opcoes)
+        self.assertIn(self.pontaria.pk, opcoes)
+
+    def test_owner_can_adjust_skill_dice_and_numeric_modifier(self):
+        ficha_pericia = FichaPericia.objects.create(
+            ficha=self.ficha, pericia=self.luta, grau='treinado',
+        )
+        url = reverse(
+            'fichas:ajustar_pericia',
+            kwargs={'pk': self.ficha.pk, 'pericia_pk': self.luta.pk},
+        )
+        self.client.force_login(self.owner)
+        detalhe_inicial = self.client.get(
+            reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}),
+        )
+        self.assertContains(detalhe_inicial, 'data-roll-result')
+        self.assertContains(detalhe_inicial, 'js/ficha.js?v=10')
+        self.assertContains(detalhe_inicial, 'Editar grau e modificadores')
+        self.assertContains(detalhe_inicial, 'data-roll-trigger')
+
+        response = self.client.post(url, {
+            'grau': 'veterano', 'dados_extra': '-1', 'bonus_extra': '2',
+        })
+
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        ficha_pericia.refresh_from_db()
+        self.assertEqual(
+            (ficha_pericia.grau, ficha_pericia.dados_extra, ficha_pericia.bonus_extra),
+            ('veterano', -1, 2),
+        )
+        self.assertTrue(LogAlteracao.objects.filter(
+            ficha=self.ficha, campo=f'pericia.{self.luta.pk}.grau',
+            valor_antigo='treinado', valor_novo='veterano',
+        ).exists())
+        self.assertTrue(LogAlteracao.objects.filter(
+            ficha=self.ficha, campo=f'pericia.{self.luta.pk}.dados_extra', valor_antigo='0',
+            valor_novo='-1',
+        ).exists())
+        self.assertTrue(LogAlteracao.objects.filter(
+            ficha=self.ficha, campo=f'pericia.{self.luta.pk}.bonus_extra', valor_antigo='0',
+            valor_novo='2',
+        ).exists())
+        ficha_pericia.dados_extra = 0
+        ficha_pericia.grau = 'treinado'
+        ficha_pericia.save(update_fields=('grau', 'dados_extra'))
+        self.ficha.forca = 3
+        self.ficha.save(update_fields=('forca',))
+        detalhe = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.assertContains(detalhe, '3 dado(s) +7')
+        self.assertContains(detalhe, 'Treinamento +5')
+        self.assertContains(detalhe, 'Modificador +2')
+        self.assertContains(detalhe, 'data-roll-type="pericia"')
+        rolagem = self.client.post(
+            reverse('fichas:rolar', kwargs={'pk': self.ficha.pk}),
+            data='{"tipo":"pericia","alvo":%d,"bonus":0}' % self.luta.pk,
+            content_type='application/json',
+        )
+        self.assertEqual(rolagem.status_code, 200)
+        self.assertEqual(rolagem.json()['bonus'], 7)
+        self.assertIn('+5 treinamento', rolagem.json()['detalhamento'])
+        self.assertIn('+2 modificador da perícia', rolagem.json()['detalhamento'])
+
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.post(
+            url, {'grau': 'treinado', 'dados_extra': '0', 'bonus_extra': '0'},
+        ).status_code, 404)
+
+    def test_experience_mode_separates_acquired_and_upcoming_track_levels(self):
+        ConfiguracaoMesa.objects.create(sistema_progressao='nivel_nex')
+        trilha = Trilha.objects.create(
+            nome='Trilha de níveis', slug='trilha-de-niveis', fonte='teste', resumo='',
+            classe=self.classe,
+            habilidades=[
+                {'nex': 10, 'nome': 'Marco nível 2', 'resumo': 'Adquirido.'},
+                {'nex': 40, 'nome': 'Marco nível 8', 'resumo': 'Adquirido.'},
+                {'nex': 65, 'nome': 'Marco nível 13', 'resumo': 'Futuro.'},
+                {'nex': 99, 'nome': 'Marco nível 20', 'resumo': 'Futuro.'},
+            ],
+        )
+        self.ficha.trilha = trilha
+        self.ficha.nivel_experiencia = 8
+        self.ficha.nex = 20
+        self.ficha.save(update_fields=('trilha', 'nivel_experiencia', 'nex'))
+        self.client.force_login(self.master)
+
+        response = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+
+        self.assertContains(response, 'Nível 8')
+        self.assertContains(response, 'Exposição paranormal: NEX 20%')
+        self.assertContains(response, 'Marco nível 2')
+        self.assertContains(response, 'Marco nível 8')
+        self.assertContains(response, 'Próximas aquisições')
+        self.assertContains(response, 'Marco nível 13')
+        self.assertContains(response, 'Marco nível 20')
+        self.assertNotContains(response, 'NEX 65%')
+        self.assertNotContains(response, 'NEX 99%')
+
+    def test_selecting_survivor_track_shows_current_stage_ability_automatically(self):
+        survivor = Classe.objects.create(
+            nome='Sobrevivente', slug='sobrevivente', fonte='SaH', resumo='',
+        )
+        trilha = Trilha.objects.create(
+            nome='Durão', slug='durão', fonte='SaH p.31', resumo='Resistente.',
+            classe=survivor,
+            habilidades=[
+                {'estagio': 2, 'nome': 'Casca inicial', 'resumo': 'Habilidade disponível.'},
+                {'estagio': 4, 'nome': 'Golpe futuro', 'resumo': 'Habilidade futura.'},
+            ],
+        )
+        self.ficha.classe = survivor
+        self.ficha.estagio = 2
+        self.ficha.nex = None
+        self.ficha.save(update_fields=('classe', 'estagio', 'nex'))
+        pendencia = Pendencia.objects.create(
+            ficha=self.ficha, tipo='trilha', descricao='Escolher trilha.', fonte='SaH p.31',
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.post(reverse(
+            'fichas:resolver_pendencia',
+            kwargs={'pk': self.ficha.pk, 'pendencia_pk': pendencia.pk},
+        ), {'trilha': trilha.pk})
+
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        detalhe = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.assertContains(detalhe, 'Habilidades adquiridas')
+        self.assertContains(detalhe, 'Casca inicial')
+        self.assertContains(detalhe, 'Habilidade disponível.')
+        self.assertNotContains(detalhe, 'Registrar a primeira habilidade da trilha')
+
+    def test_survivor_creation_starts_at_stage_one_without_progression_or_track_fields(self):
+        survivor = Classe.objects.create(
+            nome='Sobrevivente', slug='sobrevivente', fonte='SaH', resumo='',
+            progressao='estagio',
+        )
+        self.client.force_login(self.owner)
+        self.client.get(reverse('fichas:iniciar'))
+        response = self.client.get(reverse('fichas:criar', kwargs={'etapa': 1}))
+        self.assertContains(response, 'Conceito')
+        self.assertContains(response, 'Origem')
+        self.assertContains(response, 'Classe')
+        self.assertContains(response, 'Atributos')
+        self.assertContains(response, 'Perícias')
+        self.assertNotContains(response, 'NEX inicial')
+        self.assertNotContains(response, 'Trilha (opcional)')
+        self.assertContains(response, 'Acadêmico')
+        self.assertContains(response, 'data-origin-pericias=')
+        self.assertContains(response, 'data-slug="sobrevivente"')
+        self.assertNotContains(response, 'Aparência')
+        self.assertNotContains(response, 'História')
+        self.assertNotContains(response, 'grau_pericia_')
+        self.assertNotContains(response, 'Perícia obrigatória')
+        self.assertNotContains(response, 'data-mandatory-slot')
+        self.assertNotContains(response, 'Etapas da criação')
+
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {
+            'nome': 'Sobrevivente', 'conceito': 'Resiliente', 'aparencia': 'Casaco',
+            'personalidade': 'Cauteloso', 'historia': 'Sobreviveu.', 'objetivo': 'Viver',
+            'classe': survivor.pk,
+            'origem': self.origem.pk,
+            'agilidade': 2,
+            'forca': 2,
+            'intelecto': 1,
+            'presenca': 1,
+            'vigor': 2,
+            'pericias_escolhidas': [self.luta.pk, self.pontaria.pk],
+            'confirmar': 'on',
+            f'grau_pericia_{self.fortitude.pk}': 'treinado',
+            f'grau_pericia_{self.luta.pk}': 'treinado',
+            f'grau_pericia_{self.pontaria.pk}': 'treinado',
+        })
+
+        self.assertEqual(response.status_code, 302, response.get('Location'))
+        ficha = Ficha.objects.get(nome='Sobrevivente')
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': ficha.pk}))
+        self.assertEqual((ficha.estagio, ficha.nex, ficha.trilha), (1, None, None))
+
     def test_owner_can_complete_creation_wizard(self):
         self.client.force_login(self.owner)
         response = self.client.get(reverse('fichas:iniciar'))
@@ -393,22 +680,10 @@ class FichaViewsTests(TestCase):
         response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {
             'nome': 'Nova agente', 'conceito': 'Investigadora', 'aparencia': 'Casaco escuro',
             'personalidade': 'Atenta', 'historia': 'Chegou recentemente à Ordem.', 'objetivo': 'Investigar o caso',
-        })
-        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 2}))
-        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 2}), {
+            'nex_inicial': '5', 'origem': self.origem.pk, 'classe': self.classe.pk,
             'agilidade': 3, 'forca': 2, 'intelecto': 0, 'presenca': 1, 'vigor': 3,
-        })
-        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 3}))
-        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 3}), {'origem': self.origem.pk})
-        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 4}))
-        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 4}), {'classe': self.classe.pk})
-        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 5}))
-        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 5}), {
-            'pericia_obrigatoria_0': self.luta.pk, 'pericias_escolhidas': [self.pontaria.pk],
-        })
-        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 6}))
-        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 6}), {
-            'confirmar': 'on', 'nex_inicial': '5',
+            'pericias_escolhidas': [self.luta.pk, self.pontaria.pk],
+            'confirmar': 'on',
             f'grau_pericia_{self.fortitude.pk}': 'treinado',
             f'grau_pericia_{self.luta.pk}': 'treinado',
             f'grau_pericia_{self.pontaria.pk}': 'treinado',
@@ -426,20 +701,14 @@ class FichaViewsTests(TestCase):
         ConfiguracaoMesa.objects.create(sistema_progressao='nivel_nex')
         self.client.force_login(self.owner)
         self.client.get(reverse('fichas:iniciar'))
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {
             'nome': 'Agente de nível', 'conceito': 'Investigadora', 'aparencia': 'Casaco escuro',
             'personalidade': 'Atenta', 'historia': 'Chegou à Ordem.', 'objetivo': 'Investigar',
-        })
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 2}), {
+            'nivel_inicial': '1', 'nex_paranormal': '0',
+            'origem': self.origem.pk, 'classe': self.classe.pk,
             'agilidade': 3, 'forca': 2, 'intelecto': 0, 'presenca': 1, 'vigor': 3,
-        })
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 3}), {'origem': self.origem.pk})
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 4}), {'classe': self.classe.pk})
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 5}), {
-            'pericia_obrigatoria_0': self.luta.pk, 'pericias_escolhidas': [self.pontaria.pk],
-        })
-        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 6}), {
-            'confirmar': 'on', 'nivel_inicial': '1', 'nex_paranormal': '0',
+            'pericias_escolhidas': [self.luta.pk, self.pontaria.pk],
+            'confirmar': 'on',
             f'grau_pericia_{self.fortitude.pk}': 'treinado',
             f'grau_pericia_{self.luta.pk}': 'treinado',
             f'grau_pericia_{self.pontaria.pk}': 'treinado',
@@ -449,81 +718,29 @@ class FichaViewsTests(TestCase):
         self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': ficha.pk}))
         self.assertEqual((ficha.nex, ficha.nivel_experiencia, ficha.pv_atual), (0, 1, 23))
 
-    def test_creation_validates_trail_prerequisites_and_sets_starting_training(self):
-        trilha = Trilha.objects.create(
-            nome='Linha de frente',
-            slug='linha-de-frente',
-            fonte='teste',
-            resumo='',
-            classe=self.classe,
-            pre_requisitos={
-                'nex_min': 10,
-                'pericias_treinadas': ['fortitude'],
-            },
-        )
+    def test_creation_starts_at_default_nex_with_initial_skills_trained(self):
         self.client.force_login(self.owner)
         self.client.get(reverse('fichas:iniciar'))
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {
-            'nome': 'Agente avançada', 'conceito': 'Investigadora',
+        dados = {
+            'nome': 'Agente inicial', 'conceito': 'Investigadora',
             'aparencia': 'Casaco escuro', 'personalidade': 'Atenta',
             'historia': 'Chegou à Ordem.', 'objetivo': 'Investigar',
-        })
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 2}), {
+            'origem': self.origem.pk, 'classe': self.classe.pk,
             'agilidade': 3, 'forca': 2, 'intelecto': 0, 'presenca': 1, 'vigor': 3,
-        })
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 3}), {
-            'origem': self.origem.pk,
-        })
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 4}), {
-            'classe': self.classe.pk,
-        })
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 5}), {
-            'pericia_obrigatoria_0': self.luta.pk,
-            'pericias_escolhidas': [self.pontaria.pk],
-        })
-        inicial = {
-            'confirmar': 'on',
-            'nex_inicial': '5',
-            'trilha': trilha.pk,
-            f'grau_pericia_{self.fortitude.pk}': 'treinado',
-            f'grau_pericia_{self.luta.pk}': 'treinado',
-            f'grau_pericia_{self.pontaria.pk}': 'treinado',
+            'pericias_escolhidas': [self.luta.pk, self.pontaria.pk],
         }
         response = self.client.post(
-            reverse('fichas:criar', kwargs={'etapa': 6}), inicial,
+            reverse('fichas:criar', kwargs={'etapa': 1}), dados,
         )
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response, 'A ficha ainda não atende aos pré-requisitos desta trilha.',
-        )
-        self.assertFalse(Ficha.objects.filter(nome='Agente avançada').exists())
-
-        inicial['nex_inicial'] = '35'
-        inicial[f'grau_pericia_{self.fortitude.pk}'] = 'veterano'
-        inicial[f'grau_pericia_{self.luta.pk}'] = 'veterano'
-        inicial[f'grau_pericia_{self.pontaria.pk}'] = 'expert'
-        response = self.client.post(
-            reverse('fichas:criar', kwargs={'etapa': 6}), inicial,
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response, 'Os graus escolhidos excedem os aprimoramentos de perícia',
-        )
-        self.assertFalse(Ficha.objects.filter(nome='Agente avançada').exists())
-
-        inicial[f'grau_pericia_{self.pontaria.pk}'] = 'treinado'
-        response = self.client.post(
-            reverse('fichas:criar', kwargs={'etapa': 6}), inicial,
-        )
-        ficha = Ficha.objects.get(nome='Agente avançada')
+        self.assertEqual(response.status_code, 302, response.content.decode())
+        ficha = Ficha.objects.get(nome='Agente inicial')
         self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': ficha.pk}))
-        self.assertEqual((ficha.nex, ficha.trilha), (35, trilha))
+        self.assertEqual((ficha.nex, ficha.nivel_experiencia, ficha.trilha), (5, None, None))
+        self.assertEqual(ficha.origem, self.origem)
         self.assertEqual(
             dict(ficha.pericias.values_list('pericia__slug', 'grau')),
-            {'fortitude': 'veterano', 'luta': 'veterano', 'pontaria': 'treinado'},
+            {'fortitude': 'treinado', 'luta': 'treinado', 'pontaria': 'treinado'},
         )
-        self.assertFalse(ficha.pendencias.filter(tipo='trilha').exists())
-        self.assertFalse(ficha.pendencias.filter(tipo='treinamento').exists())
 
     def test_survivor_creation_cannot_start_with_advanced_skill_degrees(self):
         sobrevivente = Classe.objects.create(
@@ -558,16 +775,11 @@ class FichaViewsTests(TestCase):
         self.client.force_login(self.master)
         self.client.get(f"{reverse('fichas:iniciar')}?livre=1")
         self.assertTrue(self.client.session['fichas.criacao']['livre'])
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {})
-        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 2}), {
-            'agilidade': 4, 'forca': 4, 'intelecto': 4, 'presenca': 4, 'vigor': 4,
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {
+            'nex_inicial': '5', 'agilidade': 4, 'forca': 4,
+            'intelecto': 4, 'presenca': 4, 'vigor': 4,
         })
-        self.assertRedirects(response, reverse('fichas:criar', kwargs={'etapa': 3}))
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 3}), {})
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 4}), {})
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 5}), {})
-        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 6}), {})
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 302, response.get('Location'))
         ficha = Ficha.objects.get(dono=self.master, agilidade=4, forca=4, intelecto=4, presenca=4, vigor=4)
         self.assertIsNone(ficha.classe_id)
 
@@ -599,6 +811,76 @@ class FichaViewsTests(TestCase):
         self.assertFalse(LogAlteracao.objects.filter(valor_novo__contains='segredo do mestre').exists())
         response = self.client.post(url, dados)
         self.assertEqual(response.status_code, 409)
+
+    def test_notes_tab_saves_player_and_master_notes_with_versioning(self):
+        url = reverse('fichas:salvar_anotacoes', kwargs={'pk': self.ficha.pk})
+        detalhe_url = reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk})
+        self.client.force_login(self.owner)
+        detalhe = self.client.get(detalhe_url)
+        self.assertContains(detalhe, 'name="anotacoes_jogador"')
+        self.assertNotContains(detalhe, 'name="anotacoes_mestre"')
+
+        response = self.client.post(url, {
+            'anotacoes_jogador': 'Pista: a porta estava aberta.',
+            'anotacoes_mestre': 'Tentativa de escrita',
+            'versao': self.ficha.versao,
+        })
+
+        self.assertRedirects(response, f'{detalhe_url}#anotacoes')
+        self.ficha.refresh_from_db()
+        self.assertEqual(self.ficha.anotacoes_jogador, 'Pista: a porta estava aberta.')
+        self.assertEqual(self.ficha.anotacoes_mestre, 'segredo do mestre')
+        self.assertTrue(LogAlteracao.objects.filter(
+            ficha=self.ficha, campo='anotacoes_jogador',
+            valor_novo='Pista: a porta estava aberta.',
+        ).exists())
+        self.assertEqual(self.ficha.versao, 2)
+
+        self.client.force_login(self.master)
+        response = self.client.post(url, {
+            'anotacoes_jogador': 'Pista: a porta estava aberta.',
+            'anotacoes_mestre': 'A porta foi aberta por dentro.',
+            'versao': self.ficha.versao,
+        })
+        self.assertRedirects(response, f'{detalhe_url}#anotacoes')
+        self.ficha.refresh_from_db()
+        self.assertEqual(self.ficha.anotacoes_mestre, 'A porta foi aberta por dentro.')
+
+    def test_edit_sets_resource_maxima_and_independent_patent(self):
+        patente = Patente.objects.create(
+            nome='Recruta', slug='recruta-independente', fonte='teste',
+            credito='Baixo', limite_pd=1, recuperacao=1,
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.post(reverse('fichas:editar', kwargs={'pk': self.ficha.pk}), {
+            'nome': self.ficha.nome,
+            'jogador': '',
+            'conceito': '',
+            'aparencia': '',
+            'personalidade': '',
+            'historia': '',
+            'objetivo': '',
+            'afinidade_elemento': '',
+            'anotacoes_jogador': '',
+            'versao': self.ficha.versao,
+            'pv_max': 25,
+            'pe_max': 8,
+            'san_max': 15,
+            'pd_max': 9,
+            'pontos_prestigio': 17,
+            'patente': patente.pk,
+        })
+
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.ficha.refresh_from_db()
+        self.assertEqual(self.ficha.nex, 5)
+        self.assertEqual((self.ficha.patente, self.ficha.pontos_prestigio), (patente, 17))
+        self.assertEqual(
+            (self.ficha.ajuste_pv_max, self.ficha.ajuste_pe_max,
+             self.ficha.ajuste_san_max, self.ficha.ajuste_pd_max),
+            (4, 5, 3, 2),
+        )
 
     def test_resource_condition_and_roll_endpoints_validate_and_persist(self):
         self.client.force_login(self.owner)
@@ -689,9 +971,9 @@ class FichaViewsTests(TestCase):
         self.assertContains(response, 'data-wake-lock-toggle')
         self.assertContains(response, 'data-overflow="pv"')
         self.assertNotContains(response, 'data-resource-panel="pv_temporario"')
-        self.assertContains(response, 'id="die-d20"')
-        self.assertContains(response, 'data-die-face="4"')
-        self.assertContains(response, 'data-die-face="20"')
+        for faces in (4, 6, 8, 10, 12, 20):
+            self.assertContains(response, f'data-die-face="{faces}"')
+            self.assertContains(response, f'dices%20vector/d{faces}.svg')
 
     def test_resource_increment_crosses_maximum_then_depletes_temporary_first(self):
         self.client.force_login(self.owner)
@@ -1357,6 +1639,9 @@ class FichaViewsTests(TestCase):
             ficha=self.ficha, tipo='atributo', descricao='Aumentar atributo.',
             fonte='OPRPG p.25',
         )
+        detalhe = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.assertContains(detalhe, 'data-dismiss-pending')
+        self.assertContains(detalhe, 'data-pending-signature=')
         response = self.client.post(
             reverse(
                 'fichas:resolver_pendencia',
@@ -1396,38 +1681,83 @@ class FichaViewsTests(TestCase):
             valor_novo='treinado',
         ).exists())
 
-    def test_pending_custom_power_and_ritual_choices_are_saved(self):
+    def test_legacy_track_skill_pending_is_hidden_and_resolved_automatically(self):
+        trilha = Trilha.objects.create(
+            nome='Trilha escolhida', slug='trilha-escolhida', fonte='SaH p.31',
+            resumo='', classe=self.classe,
+            habilidades=[{'nex': 10, 'nome': 'Primeira habilidade', 'resumo': 'Já automática.'}],
+        )
+        self.ficha.trilha = trilha
+        self.ficha.nex = 10
+        self.ficha.save(update_fields=('trilha', 'nex'))
+        pendencia = Pendencia.objects.create(
+            ficha=self.ficha, tipo='poder',
+            descricao='Registrar a primeira habilidade da trilha.', fonte='SaH p.31',
+        )
         self.client.force_login(self.owner)
+
+        detalhe = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.assertNotContains(detalhe, 'Registrar a primeira habilidade da trilha')
+        resposta = self.client.post(reverse(
+            'fichas:resolver_pendencia',
+            kwargs={'pk': self.ficha.pk, 'pendencia_pk': pendencia.pk},
+        ), {})
+
+        self.assertRedirects(resposta, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.assertTrue(Pendencia.objects.get(pk=pendencia.pk).resolvida)
+
+    def test_pending_catalog_power_and_track_choices_show_descriptions(self):
+        self.client.force_login(self.owner)
+        trilha_catalogada = Trilha.objects.create(
+            nome='Linha de frente', slug='linha-de-frente', fonte='OPRPG p.26',
+            resumo='Protege o grupo no combate.', classe=self.classe,
+        )
         trilha = Pendencia.objects.create(
             ficha=self.ficha, tipo='trilha', descricao='Escolher trilha.',
             fonte='OPRPG p.25',
         )
+        url_trilha = reverse(
+            'fichas:resolver_pendencia',
+            kwargs={'pk': self.ficha.pk, 'pendencia_pk': trilha.pk},
+        )
+        response = self.client.get(url_trilha)
+        self.assertContains(response, 'Linha de frente')
+        self.assertContains(response, 'Protege o grupo no combate.')
+        self.assertContains(response, 'OPRPG p.26')
         response = self.client.post(
-            reverse(
-                'fichas:resolver_pendencia',
-                kwargs={'pk': self.ficha.pk, 'pendencia_pk': trilha.pk},
-            ),
-            {'nome_personalizado': 'Trilha própria', 'resumo_personalizado': 'Resumo breve.'},
+            url_trilha,
+            {'trilha': trilha_catalogada.pk},
         )
         self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
         self.ficha.refresh_from_db()
-        self.assertEqual(self.ficha.trilha_nome_personalizado, 'Trilha própria')
-        self.assertEqual(self.ficha.trilha_resumo_personalizado, 'Resumo breve.')
+        self.assertEqual(self.ficha.trilha, trilha_catalogada)
         self.assertTrue(Pendencia.objects.get(pk=trilha.pk).resolvida)
 
+        poder_catalogado = Poder.objects.create(
+            nome='Poder de apoio', slug='poder-de-apoio', fonte='OPRPG p.25',
+            resumo='Uma habilidade catalogada para o agente.', tipo='geral',
+        )
         poder = Pendencia.objects.create(
             ficha=self.ficha, tipo='poder', descricao='Escolher poder.',
             fonte='OPRPG p.25',
         )
+        url_poder = reverse(
+            'fichas:resolver_pendencia',
+            kwargs={'pk': self.ficha.pk, 'pendencia_pk': poder.pk},
+        )
+        response = self.client.get(url_poder)
+        self.assertContains(response, 'Poder de apoio')
+        self.assertContains(response, 'Uma habilidade catalogada para o agente.')
+        self.assertNotContains(response, 'Resumo mecânico curto')
         response = self.client.post(
-            reverse(
-                'fichas:resolver_pendencia',
-                kwargs={'pk': self.ficha.pk, 'pendencia_pk': poder.pk},
-            ),
+            url_poder,
             {'nome_personalizado': 'Poder próprio', 'resumo_personalizado': 'Efeito mecânico breve.'},
         )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(FichaPoder.objects.filter(ficha=self.ficha).exists())
+        response = self.client.post(url_poder, {'poder': poder_catalogado.pk})
         self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
-        self.assertEqual(FichaPoder.objects.get(ficha=self.ficha).nome_personalizado, 'Poder próprio')
+        self.assertEqual(FichaPoder.objects.get(ficha=self.ficha).poder, poder_catalogado)
         self.assertTrue(Pendencia.objects.get(pk=poder.pk).resolvida)
 
         ritual = Pendencia.objects.create(
@@ -1700,6 +2030,13 @@ class FichaViewsTests(TestCase):
 
         self.assertContains(response, 'Rolar teste')
         self.assertContains(response, 'Ajustes opcionais')
+        self.assertContains(response, 'data-roll-result')
+        self.assertContains(response, 'data-damage-form')
+        self.assertNotContains(response, 'damage-critical-multiplier')
+        self.assertContains(response, '<section class="roll-panel sheet-roll-panel roll-advanced-panel"')
+        self.assertContains(response, 'href="#anotacoes"')
+        self.assertContains(response, 'id="anotacoes"')
+        self.assertContains(response, 'class="attribute-roll-card defense-card"')
         self.assertNotContains(response, 'Dados físicos (principal)')
         self.assertNotContains(response, 'Resultados dos dados físicos')
         self.assertContains(response, 'data-attribute-value="1"')
@@ -1739,9 +2076,20 @@ class FichaViewsTests(TestCase):
         self.assertTrue(LogAlteracao.objects.filter(
             ficha=self.ficha, campo='habilidade.adicionada', valor_novo=habilidade.nome,
         ).exists())
+        response = self.client.post(reverse(
+            'fichas:editar_habilidade',
+            kwargs={'pk': self.ficha.pk, 'habilidade_pk': habilidade.pk},
+        ), {
+            'nome': 'Reflexos treinados', 'descricao': 'Texto atualizado.',
+        })
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        habilidade.refresh_from_db()
+        self.assertEqual((habilidade.nome, habilidade.descricao), (
+            'Reflexos treinados', 'Texto atualizado.',
+        ))
         self.assertContains(
             self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk})),
-            'Uma habilidade personalizada.',
+            'Texto atualizado.',
         )
 
         self.client.force_login(self.other)
@@ -1761,6 +2109,130 @@ class FichaViewsTests(TestCase):
             kwargs={'pk': self.ficha.pk, 'habilidade_pk': habilidade_mestre.pk},
         )).status_code, 302)
         self.assertFalse(HabilidadeFicha.objects.filter(pk=habilidade_mestre.pk).exists())
+
+    def test_unified_ability_form_creates_custom_ability_or_catalog_power(self):
+        poder = Poder.objects.create(
+            nome='Poder selecionável', slug='poder-selecionavel',
+            fonte='OPRPG p.25', resumo='Descrição original.', tipo='geral',
+        )
+        url = reverse('fichas:adicionar_habilidade', kwargs={'pk': self.ficha.pk})
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.assertContains(response, 'Habilidade ou poder')
+        self.assertContains(response, 'data-power-name="Poder selecionável"')
+
+        response = self.client.post(url, {
+            'poder': '', 'nome_personalizado': 'Habilidade própria',
+            'resumo_personalizado': 'Descrição própria.',
+        })
+
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        habilidade = HabilidadeFicha.objects.get(ficha=self.ficha)
+        self.assertEqual((habilidade.nome, habilidade.descricao), (
+            'Habilidade própria', 'Descrição própria.',
+        ))
+
+        response = self.client.post(url, {
+            'poder': poder.pk,
+            'nome_personalizado': 'Poder editado',
+            'resumo_personalizado': 'Descrição editada.',
+        })
+
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        ficha_poder = FichaPoder.objects.get(ficha=self.ficha, poder=poder)
+        self.assertEqual((ficha_poder.nome_personalizado, ficha_poder.resumo_personalizado), (
+            'Poder editado', 'Descrição editada.',
+        ))
+
+    def test_owner_can_manage_catalog_and_placeholder_powers_and_rituals(self):
+        poder = Poder.objects.create(
+            nome='Poder de catálogo', slug='poder-ficha-catalogo',
+            fonte='OPRPG p.25', resumo='Resumo do catálogo.', tipo='geral',
+        )
+        ritual = Ritual.objects.create(
+            nome='Ritual de catálogo', slug='ritual-ficha-catalogo',
+            fonte='OPRPG p.120', resumo='Resumo do ritual.', circulo=1,
+            elemento='energia', execucao='Padrão', alcance='Curto',
+            alvo_area='1 ser', duracao='Instantânea', custo='1 PE',
+        )
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.assertContains(response, 'Adicionar')
+        self.assertContains(response, 'Poder do catálogo')
+        self.assertContains(response, 'Ritual de catálogo')
+
+        url_poder = reverse('fichas:adicionar_poder_ficha', kwargs={'pk': self.ficha.pk})
+        poder_bloqueado = Poder.objects.create(
+            nome='Poder bloqueado', slug='poder-ficha-bloqueado',
+            fonte='OPRPG p.25', resumo='Requer progressão maior.', tipo='geral',
+            pre_requisitos={'nex_min': 10},
+        )
+        response = self.client.post(url_poder, {'poder': poder_bloqueado.pk})
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(FichaPoder.objects.filter(ficha=self.ficha).exists())
+
+        response = self.client.post(url_poder, {'poder': poder.pk})
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        ficha_poder = FichaPoder.objects.get(ficha=self.ficha)
+        self.assertEqual(ficha_poder.poder, poder)
+
+        response = self.client.post(
+            reverse('fichas:editar_poder_ficha', kwargs={
+                'pk': self.ficha.pk, 'poder_pk': ficha_poder.pk,
+            }),
+            {'poder': poder.pk, 'resumo_personalizado': 'Anotação da ficha.'},
+        )
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        ficha_poder.refresh_from_db()
+        self.assertEqual(ficha_poder.resumo_personalizado, 'Anotação da ficha.')
+
+        response = self.client.post(url_poder, {
+            'poder': '', 'nome_personalizado': 'Poder próprio',
+            'resumo_personalizado': 'Efeito por definir.',
+        })
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        poder_personalizado = FichaPoder.objects.get(nome_personalizado='Poder próprio')
+        self.assertIsNone(poder_personalizado.poder_id)
+
+        url_ritual = reverse('fichas:adicionar_ritual_ficha', kwargs={'pk': self.ficha.pk})
+        response = self.client.post(url_ritual, {'ritual': ritual.pk})
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        ficha_ritual = FichaRitual.objects.get(ficha=self.ficha, ritual=ritual)
+        response = self.client.post(url_ritual, {
+            'ritual': '', 'nome_personalizado': 'Ritual placeholder',
+            'resumo_personalizado': 'Resumo pendente de catálogo.',
+        })
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        placeholder = FichaRitual.objects.get(nome_personalizado='Ritual placeholder')
+        self.assertIsNone(placeholder.ritual_id)
+
+        response = self.client.post(reverse('fichas:editar_ritual_ficha', kwargs={
+            'pk': self.ficha.pk, 'ritual_pk': ficha_ritual.pk,
+        }), {'ritual': ritual.pk, 'resumo_personalizado': 'Nota de preparação.'})
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        ficha_ritual.refresh_from_db()
+        self.assertEqual(ficha_ritual.resumo_personalizado, 'Nota de preparação.')
+        self.assertEqual(self.client.post(reverse(
+            'fichas:remover_ritual_ficha',
+            kwargs={'pk': self.ficha.pk, 'ritual_pk': placeholder.pk},
+        )).status_code, 302)
+        self.assertFalse(FichaRitual.objects.filter(pk=placeholder.pk).exists())
+
+    def test_catalog_power_form_accepts_autofilled_name_and_description(self):
+        poder = Poder.objects.create(
+            nome='Poder de catálogo', slug='poder-ficha-autofill',
+            fonte='OPRPG p.25', resumo='Resumo do catálogo.', tipo='geral',
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.post(reverse('fichas:adicionar_poder_ficha', kwargs={'pk': self.ficha.pk}), {
+            'poder': poder.pk,
+            'nome_personalizado': poder.nome,
+            'resumo_personalizado': poder.resumo,
+        })
+
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.assertEqual(FichaPoder.objects.get(ficha=self.ficha).poder, poder)
 
     def test_owner_can_delete_sheet_and_remove_its_combat_participant(self):
         outra_ficha = Ficha.objects.create(dono=self.other, nome='Outro agente', nex=5)
@@ -1968,22 +2440,15 @@ class FichaViewsTests(TestCase):
         ConfiguracaoMesa.objects.create(max_fichas_ativas=2)
         self.client.force_login(self.owner)
         self.client.get(reverse('fichas:iniciar'))
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {
-            'nome': 'Nova agente', 'conceito': 'Investigadora', 'aparencia': 'Casaco',
-            'personalidade': 'Atenta', 'historia': 'Chegou à Ordem.', 'objetivo': 'Investigar',
-        })
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 2}), {
-            'agilidade': 3, 'forca': 2, 'intelecto': 0, 'presenca': 1, 'vigor': 3,
-        })
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 3}), {'origem': self.origem.pk})
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 4}), {'classe': self.classe.pk})
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 5}), {
-            'pericia_obrigatoria_0': self.luta.pk, 'pericias_escolhidas': [self.pontaria.pk],
-        })
         Ficha.objects.create(dono=self.owner, nome='Criada em outra sessão', nex=5)
 
-        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 6}), {
-            'confirmar': 'on', 'nex_inicial': '5',
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {
+            'nome': 'Nova agente', 'conceito': 'Investigadora', 'aparencia': 'Casaco',
+            'personalidade': 'Atenta', 'historia': 'Chegou à Ordem.', 'objetivo': 'Investigar',
+            'nex_inicial': '5', 'origem': self.origem.pk, 'classe': self.classe.pk,
+            'agilidade': 3, 'forca': 2, 'intelecto': 0, 'presenca': 1, 'vigor': 3,
+            'pericias_escolhidas': [self.luta.pk, self.pontaria.pk],
+            'confirmar': 'on',
             f'grau_pericia_{self.fortitude.pk}': 'treinado',
             f'grau_pericia_{self.luta.pk}': 'treinado',
             f'grau_pericia_{self.pontaria.pk}': 'treinado',
@@ -2046,6 +2511,71 @@ class ConfiguracaoMesaViewsTests(TestCase):
         self.assertFalse(LogAlteracao.objects.filter(
             ficha=ficha, campo='pv_atual', valor_antigo='21', valor_novo='20',
         ).exists())
+
+
+class ConfiguracaoFichaViewsTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            username='solo-owner', password=get_random_string(32),
+        )
+        self.classe = Classe.objects.create(
+            nome='Combatente', slug='combatente', fonte='OPRPG', resumo='',
+            pv_base=20, pv_por_nex=4, pe_base=2, pe_por_nex=2,
+            san_base=12, san_por_nex=3, pd_base=6, pd_por_nex=3,
+        )
+        self.ficha = Ficha.objects.create(
+            dono=self.owner, nome='Ficha solo', classe=self.classe, nex=5,
+            pv_atual=24, pe_atual=4, san_atual=15,
+        )
+        ConfiguracaoFicha.objects.create(ficha=self.ficha)
+        Patente.objects.create(
+            nome='Recruta', slug='recruta', fonte='SaH p.108', resumo='',
+            credito='I', limite_pd=1, recuperacao=1,
+        )
+        self.client.force_login(self.owner)
+
+    def test_owner_can_configure_an_unlinked_sheet(self):
+        url = reverse('fichas:configurar_ficha', kwargs={'pk': self.ficha.pk})
+        detalhe = self.client.get(reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        self.assertContains(detalhe, 'Configuração da ficha')
+        self.assertContains(detalhe, 'href="#progressao"')
+        self.assertContains(detalhe, 'id="progressao"')
+        self.assertContains(detalhe, 'Sistema de progressão')
+        response = self.client.post(url, {
+            'versao': self.ficha.versao,
+            'modo_recursos': 'sem_sanidade',
+            'sistema_progressao': 'patentes',
+            'ferimentos_debilitantes': 'on',
+            'jogador_pode_subir_nex': 'on',
+            'numero_sessao': 2,
+        })
+        self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': self.ficha.pk}))
+        configuracao = ConfiguracaoFicha.objects.get(ficha=self.ficha)
+        self.assertEqual(
+            (configuracao.modo_recursos, configuracao.sistema_progressao,
+             configuracao.numero_sessao),
+            ('sem_sanidade', 'patentes', 2),
+        )
+        self.ficha.refresh_from_db()
+        self.assertIsNone(self.ficha.nex)
+        self.assertEqual(self.ficha.patente.slug, 'recruta')
+        self.assertGreater(self.ficha.pd_atual, 0)
+
+    def test_linked_sheet_configuration_is_controlled_by_its_table(self):
+        mesa = Mesa.objects.create(
+            mestre=self.owner, nome='Mesa da ficha', publica=True,
+        )
+        InscricaoMesa.objects.create(mesa=mesa, ficha=self.ficha)
+        response = self.client.post(
+            reverse('fichas:configurar_ficha', kwargs={'pk': self.ficha.pk}),
+            {
+                'versao': self.ficha.versao,
+                'modo_recursos': 'sem_sanidade',
+                'sistema_progressao': 'nex',
+                'numero_sessao': 1,
+            },
+        )
+        self.assertEqual(response.status_code, 403)
 
 
 class ProgressaoNexViewsTests(TestCase):
@@ -2142,7 +2672,7 @@ class ProgressaoNexViewsTests(TestCase):
         self.assertEqual((ficha.estagio, ficha.versao), (3, 2))
         self.assertEqual(
             list(ficha.pendencias.values_list('tipo', flat=True)),
-            ['trilha', 'poder', 'atributo'],
+            ['trilha', 'atributo'],
         )
         self.assertTrue(LogAlteracao.objects.filter(
             ficha=ficha, campo='estagio', valor_antigo='1', valor_novo='3',
@@ -2228,9 +2758,14 @@ class ProgressaoNivelViewsTests(TestCase):
         mesa = ConfiguracaoMesa.objects.get(pk=1)
         mesa.sistema_progressao = 'nex'
         mesa.save(update_fields=('sistema_progressao',))
+        patente = Patente.objects.create(
+            nome='Recruta independente', slug='recruta-independente', fonte='SaH',
+            credito='Baixo', limite_pd=1, recuperacao=1,
+        )
         self.ficha.nex = 20
+        self.ficha.patente = patente
         self.ficha.pv_atual = 100
-        self.ficha.save(update_fields=('nex', 'pv_atual'))
+        self.ficha.save(update_fields=('nex', 'patente', 'pv_atual'))
         self.client.force_login(self.master)
         response = self.client.post(reverse('fichas:configurar_mesa'), {
             'modo_recursos': 'padrao', 'sistema_progressao': 'nivel_nex',
@@ -2243,8 +2778,9 @@ class ProgressaoNivelViewsTests(TestCase):
         self.assertEqual(mesa.sistema_progressao, 'nivel_nex')
         self.ficha.refresh_from_db()
         self.assertEqual(
-            (self.ficha.nex, self.ficha.nivel_experiencia, self.ficha.pv_atual, self.ficha.versao),
-            (0, 4, 100, 2),
+            (self.ficha.nex, self.ficha.nivel_experiencia, self.ficha.patente,
+             self.ficha.pv_atual, self.ficha.versao),
+            (0, 4, patente, 100, 2),
         )
         self.assertTrue(LogAlteracao.objects.filter(
             ficha=self.ficha, campo='configuracao.nivel_experiencia',
@@ -2488,25 +3024,17 @@ class ProgressaoPatentesViewsTests(TestCase):
         )
         self.client.force_login(self.owner)
         self.client.get(reverse('fichas:iniciar'))
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {
+        response = self.client.post(reverse('fichas:criar', kwargs={'etapa': 1}), {
             'nome': 'Agente recruta', 'conceito': 'Investigador',
             'aparencia': 'Roupa escura', 'personalidade': 'Observador',
             'historia': 'Entrou na Ordem recentemente.', 'objetivo': 'Investigar',
-        })
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 2}), {
+            'patente_inicial': self.recruta.pk, 'origem': origem.pk,
+            'classe': self.classe.pk,
             'agilidade': 3, 'forca': 2, 'intelecto': 0, 'presenca': 1, 'vigor': 3,
-        })
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 3}), {'origem': origem.pk})
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 4}), {'classe': self.classe.pk})
-        self.client.post(reverse('fichas:criar', kwargs={'etapa': 5}), {
             'pericias_escolhidas': [luta.pk],
+            'confirmar': 'on',
+            f'grau_pericia_{luta.pk}': 'treinado',
         })
-        response = self.client.post(
-            reverse('fichas:criar', kwargs={'etapa': 6}), {
-                'confirmar': 'on', 'patente_inicial': self.recruta.pk,
-                f'grau_pericia_{luta.pk}': 'treinado',
-            },
-        )
 
         ficha = Ficha.objects.get(nome='Agente recruta')
         self.assertRedirects(response, reverse('fichas:detalhe', kwargs={'pk': ficha.pk}))
@@ -2535,6 +3063,65 @@ class MesaAndMasterCommandTests(TestCase):
 
 
 class CarregarRegrasTests(TestCase):
+    def test_loads_complete_approved_powers_and_tracks(self):
+        call_command('carregar_regras', stdout=None)
+
+        self.assertEqual(Poder.objects.count(), 143)
+        self.assertEqual(Poder.objects.filter(tipo='classe').count(), 72)
+        self.assertEqual(Poder.objects.filter(tipo='geral').count(), 38)
+        self.assertEqual(Poder.objects.filter(tipo='paranormal').count(), 33)
+        self.assertFalse(Poder.objects.filter(fonte='').exists())
+        self.assertFalse(Poder.objects.filter(resumo='').exists())
+        self.assertEqual(Trilha.objects.count(), 27)
+        self.assertEqual(
+            sum(len(trilha.habilidades) for trilha in Trilha.objects.all()), 102,
+        )
+        for trilha in Trilha.objects.select_related('classe'):
+            esperado = 2 if trilha.classe.slug == 'sobrevivente' else 4
+            self.assertEqual(len(trilha.habilidades), esperado, trilha.slug)
+
+    def test_power_prerequisites_count_elements_and_require_matching_affinity(self):
+        senha_teste = 'SenhaSegura123!'
+        usuario = User.objects.create_user(username='elementos', password=senha_teste)
+        classe = Classe.objects.create(
+            nome='Combatente', slug='combatente', fonte='teste', resumo='',
+        )
+        ficha = Ficha.objects.create(
+            dono=usuario, nome='Agente', classe=classe, nex=55, afinidade_elemento='morte',
+        )
+        poderes = [
+            Poder.objects.create(
+                nome=f'Poder de Morte {indice}', slug=f'poder-morte-{indice}',
+                fonte='teste', resumo='', tipo='paranormal', elemento='morte',
+            )
+            for indice in (1, 2)
+        ]
+        requisito_morte = Poder.objects.create(
+            nome='Poder Morte 2', slug='poder-morte-dois', fonte='teste', resumo='',
+            tipo='paranormal', elemento='morte',
+            pre_requisitos={'poderes_elemento_min': {'morte': 2}},
+        )
+        requisito_afinidade = Poder.objects.create(
+            nome='Afinidade de Energia', slug='afinidade-energia', fonte='teste', resumo='',
+            tipo='paranormal', elemento='energia', afinidade_resumo='Benefício aprimorado.',
+        )
+
+        ficha.afinidade_elemento = ''
+        self.assertTrue(poder_atende_pre_requisitos(requisito_afinidade, ficha))
+        FichaPoder.objects.create(ficha=ficha, poder=requisito_afinidade)
+        self.assertFalse(poder_atende_pre_requisitos(requisito_afinidade, ficha))
+        ficha.afinidade_elemento = 'energia'
+        self.assertTrue(poder_atende_pre_requisitos(requisito_afinidade, ficha))
+        FichaPoder.objects.create(ficha=ficha, poder=requisito_afinidade)
+        self.assertFalse(poder_atende_pre_requisitos(requisito_afinidade, ficha))
+        ficha.afinidade_elemento = 'morte'
+        self.assertFalse(poder_atende_pre_requisitos(requisito_afinidade, ficha))
+
+        FichaPoder.objects.create(ficha=ficha, poder=poderes[0])
+        self.assertFalse(poder_atende_pre_requisitos(requisito_morte, ficha))
+        FichaPoder.objects.create(ficha=ficha, poder=poderes[1])
+        self.assertTrue(poder_atende_pre_requisitos(requisito_morte, ficha))
+
     def test_loads_priority_catalogs_and_sources(self):
         call_command('carregar_regras', stdout=None)
 
@@ -2592,8 +3179,11 @@ class CarregarRegrasTests(TestCase):
                 }],
                 'poderes.json': [{
                     'slug': 'poder-teste', 'nome': 'Poder de teste', 'fonte': 'teste',
-                    'resumo': '', 'tipo': 'geral',
-                    'pre_requisitos': {'classe_slug': 'sobrevivente', 'estagio_min': 2},
+                    'resumo': '', 'tipo': 'paranormal', 'elemento': 'morte',
+                    'pre_requisitos': {
+                        'classe_slug': 'sobrevivente', 'estagio_min': 2,
+                        'poderes_elemento_min': {'morte': 1},
+                    },
                     'custo': '',
                 }],
                 'rituais.json': [{
@@ -2623,8 +3213,12 @@ class CarregarRegrasTests(TestCase):
         self.assertEqual(Poder.objects.count(), 1)
         self.assertEqual(
             Poder.objects.get(slug='poder-teste').pre_requisitos,
-            {'classe_slug': 'sobrevivente', 'estagio_min': 2},
+            {
+                'classe_slug': 'sobrevivente', 'estagio_min': 2,
+                'poderes_elemento_min': {'morte': 1},
+            },
         )
+        self.assertEqual(Poder.objects.get(slug='poder-teste').elemento, 'morte')
         self.assertEqual(Ritual.objects.count(), 1)
         self.assertEqual(ItemCatalogo.objects.count(), 1)
 

@@ -12,7 +12,17 @@ from core.models import (
     RegistroAmeaca,
     RegistroCena,
 )
-from fichas.models import Classe, Condicao, ConfiguracaoMesa, Ficha, FichaCondicao, LogAlteracao, Rolagem
+from fichas.models import (
+    Classe,
+    Condicao,
+    ConfiguracaoFicha,
+    ConfiguracaoMesa,
+    Ficha,
+    FichaCondicao,
+    LogAlteracao,
+    RegistroPrestigio,
+    Rolagem,
+)
 
 User = get_user_model()
 
@@ -82,9 +92,8 @@ class AuthenticationSecurityTests(TestCase):
 		self.assertEqual(self.client.post(reverse('service_worker')).status_code, 405)
 		login = self.client.get(reverse('login'))
 		self.assertContains(login, 'href="/static/manifest.webmanifest"')
-		self.assertContains(login, 'href="/static/css/style.css?v=12"')
+		self.assertContains(login, 'href="/static/css/style.css?v=21"')
 		self.assertContains(login, 'src="/static/js/pwa.js"')
-		self.assertContains(login, 'data-appearance-panel')
 		self.assertContains(login, 'src="/static/js/aparencia.js?v=3"')
 		self.assertNotContains(login, 'id="die-d20"')
 
@@ -136,7 +145,7 @@ class MasterDashboardTests(TestCase):
             password=get_random_string(32),
         )
         classe = Classe.objects.create(
-            nome='Combatente', slug='combatente-dashboard', fonte='OPRPG p. 25', resumo='',
+            nome='Combatente', slug='combatente', fonte='OPRPG p. 25', resumo='',
         )
         self.ficha = Ficha.objects.create(
             dono=self.owner, nome='Agente do Painel', classe=classe, nex=5,
@@ -177,6 +186,9 @@ class MasterDashboardTests(TestCase):
         self.assertContains(response, self.scene.nome)
         self.assertContains(response, 'Histórico de rolagens')
         self.assertContains(response, 'Configuração da mesa')
+        self.assertContains(response, 'class="master-sheet-name"')
+        self.assertContains(response, 'class="checklist-control"')
+        self.assertContains(response, 'js/mesa.js?v=13')
         self.assertNotContains(response, 'Nota reservada ao mestre')
 
         cursor = Rolagem.objects.filter(ficha=self.ficha).latest('pk').pk
@@ -206,6 +218,85 @@ class MasterDashboardTests(TestCase):
         response = self.client.post(url)
         self.assertRedirects(response, reverse('painel_mestre'))
         self.assertEqual(ConfiguracaoMesa.objects.get().numero_sessao, 2)
+
+    def test_dashboard_resources_are_per_sheet_and_can_be_adjusted_without_opening_sheet(self):
+        alternative = Ficha.objects.create(
+            dono=self.owner, nome='Z Agente alternativa', classe=self.ficha.classe, nex=5,
+        )
+        ConfiguracaoFicha.objects.create(
+            ficha=alternative, modo_recursos='sem_sanidade',
+        )
+        self.client.force_login(self.master)
+
+        page = self.client.get(reverse('painel_mestre'))
+        self.assertContains(page, 'data-resource="pe"')
+        self.assertContains(page, 'data-resource="san"')
+        updates = self.client.get(reverse('painel_mestre_atualizacoes')).json()
+        fichas_por_id = {item['id']: item for item in updates['fichas']}
+        self.assertTrue(fichas_por_id[self.ficha.pk]['selecionavel'])
+        self.assertTrue(fichas_por_id[alternative.pk]['selecionavel'])
+        self.assertEqual(
+            {item['chave'] for item in fichas_por_id[self.ficha.pk]['recursos']},
+            {'pv', 'pe', 'san'},
+        )
+        self.assertEqual(
+            {item['chave'] for item in fichas_por_id[alternative.pk]['recursos']},
+            {'pv', 'pd'},
+        )
+
+        response = self.client.post(
+            reverse('fichas:recurso', kwargs={'pk': self.ficha.pk}),
+            data='{"recurso":"pe","delta":1}',
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.ficha.refresh_from_db()
+        self.assertEqual(self.ficha.pe_atual, response.json()['atual'])
+        self.assertTrue(LogAlteracao.objects.filter(
+            ficha=self.ficha, usuario=self.master, campo='pe_atual',
+        ).exists())
+
+    def test_dashboard_updates_work_when_there_are_no_sheets(self):
+        self.ficha.delete()
+        self.client.force_login(self.master)
+
+        response = self.client.get(reverse('painel_mestre_atualizacoes'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['fichas'], [])
+
+    def test_master_can_reset_session_count_without_deleting_history(self):
+        ConfiguracaoMesa.objects.create(numero_sessao=8)
+        ConfiguracaoFicha.objects.create(
+            ficha=self.ficha, numero_sessao=8,
+        )
+        self.ficha.cicatrizado_sessao_usada = 8
+        self.ficha.save(update_fields=('cicatrizado_sessao_usada',))
+        registro = RegistroPrestigio.objects.create(
+            ficha=self.ficha, usuario=self.owner, numero_sessao=8,
+            evento='pista', quantidade=1, delta=2,
+        )
+        url = reverse('limpar_contagem_sessoes')
+
+        self.client.force_login(self.owner)
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.client.force_login(self.master)
+        response = self.client.post(url)
+
+        self.assertRedirects(response, reverse('painel_mestre'))
+        self.assertEqual(ConfiguracaoMesa.objects.get().numero_sessao, 0)
+        self.assertEqual(
+            ConfiguracaoFicha.objects.get(ficha=self.ficha).numero_sessao, 0,
+        )
+        self.assertIsNone(Ficha.objects.get(pk=self.ficha.pk).cicatrizado_sessao_usada)
+        registro.refresh_from_db()
+        self.assertEqual(registro.numero_sessao, 0)
+
+        self.client.post(reverse('iniciar_nova_sessao'))
+        self.assertEqual(ConfiguracaoMesa.objects.get().numero_sessao, 1)
+        self.assertEqual(
+            ConfiguracaoFicha.objects.get(ficha=self.ficha).numero_sessao, 1,
+        )
 
     def test_master_can_apply_audited_condition_to_selected_active_sheets_only(self):
         condition = Condicao.objects.create(
@@ -353,6 +444,26 @@ class SceneManagementTests(TestCase):
         self.assertTrue(RegistroCena.objects.filter(
             cena=self.scene, acao=f'pista_criada:{clue.pk}',
         ).exists())
+
+    def test_only_master_can_delete_scene_and_deletion_cascades_to_clues_and_history(self):
+        clue = PistaCena.objects.create(
+            cena=self.scene, titulo='Chave', conteudo='Debaixo do tapete.',
+        )
+        history = RegistroCena.objects.create(
+            cena=self.scene, usuario=self.master, acao='publicada',
+        )
+        url = reverse('excluir_cena', args=[self.scene.pk])
+
+        self.client.force_login(self.player)
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.client.force_login(self.master)
+        self.assertEqual(self.client.get(url).status_code, 405)
+        response = self.client.post(url)
+
+        self.assertRedirects(response, f'{reverse("painel_mestre")}#cenas')
+        self.assertFalse(CenaMesa.objects.filter(pk=self.scene.pk).exists())
+        self.assertFalse(PistaCena.objects.filter(pk=clue.pk).exists())
+        self.assertFalse(RegistroCena.objects.filter(pk=history.pk).exists())
 
     def test_master_bestiary_is_private_editable_and_audited(self):
         create_url = reverse('criar_ameaca')

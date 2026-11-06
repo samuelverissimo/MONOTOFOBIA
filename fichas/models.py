@@ -4,7 +4,7 @@ from django.core.validators import MaxLengthValidator, MaxValueValidator, MinVal
 from django.db import models
 from django.db.models import Q
 
-from .regras import CAMPOS_EFEITOS_CONDICAO
+from .regras import CAMPOS_EFEITOS_CONDICAO, nex_equivalente_por_nivel
 from .pre_requisitos import validar_pre_requisitos
 
 RESUMO_VALIDATORS = [MaxLengthValidator(500)]
@@ -100,8 +100,18 @@ class Poder(CatalogoBase):
         ('geral', 'Geral'),
         ('paranormal', 'Paranormal'),
     ]
+    ELEMENTOS = [
+        ('sangue', 'Sangue'),
+        ('morte', 'Morte'),
+        ('conhecimento', 'Conhecimento'),
+        ('energia', 'Energia'),
+        ('medo', 'Medo'),
+    ]
 
     tipo = models.CharField(max_length=12, choices=TIPOS)
+    elemento = models.CharField(max_length=16, choices=ELEMENTOS, blank=True)
+    afinidade_resumo = models.TextField(validators=RESUMO_VALIDATORS, blank=True)
+    repetivel = models.BooleanField(default=False)
     pre_requisitos = models.JSONField(default=dict, blank=True)
     custo = models.CharField(max_length=80, blank=True)
 
@@ -221,6 +231,12 @@ class Ficha(models.Model):
         ('energia', 'Energia'),
         ('medo', 'Medo'),
     ]
+    ELEMENTOS_AFINIDADE = [
+        ('sangue', 'Sangue'),
+        ('morte', 'Morte'),
+        ('conhecimento', 'Conhecimento'),
+        ('energia', 'Energia'),
+    ]
     STATUS = [
         ('ativa', 'Ativa'),
         ('arquivada', 'Arquivada'),
@@ -246,6 +262,9 @@ class Ficha(models.Model):
     )
     cicatrizado_elemento = models.CharField(
         max_length=16, choices=ELEMENTOS_CICATRIZADO, blank=True,
+    )
+    afinidade_elemento = models.CharField(
+        max_length=16, choices=ELEMENTOS_AFINIDADE, blank=True,
     )
     cicatrizado_perigo = models.CharField(max_length=120, blank=True)
     cicatrizado_sessao_usada = models.PositiveIntegerField(null=True, blank=True)
@@ -290,7 +309,7 @@ class Ficha(models.Model):
         constraints = [
             models.CheckConstraint(
                 condition=(
-                    Q(nex__isnull=False, estagio__isnull=True, patente__isnull=True)
+                    Q(nex__isnull=False, estagio__isnull=True)
                     | Q(nex__isnull=True, estagio__isnull=False, patente__isnull=True)
                     | Q(nex__isnull=True, estagio__isnull=True, patente__isnull=False)
                 ),
@@ -313,9 +332,45 @@ class Ficha(models.Model):
                 raise ValidationError('Sobreviventes usam estágio, não NEX ou patente.')
         elif self.classe_id and self.nex is None and not self.patente_id:
             raise ValidationError('Esta classe deve usar NEX ou patente.')
+        if self.afinidade_elemento:
+            nex_efetivo = self.nex
+            if self.nivel_experiencia:
+                nex_efetivo = nex_equivalente_por_nivel(self.nivel_experiencia)
+            elif self.patente_id:
+                nex_efetivo = nex_equivalente_por_nivel(max(1, self.patente.limite_pd))
+            if nex_efetivo is None or nex_efetivo < 50:
+                raise ValidationError('Afinidade elemental exige NEX equivalente de pelo menos 50%.')
 
     def __str__(self):
         return self.nome
+
+
+class ConfiguracaoFicha(models.Model):
+    ficha = models.OneToOneField(
+        Ficha, on_delete=models.CASCADE, related_name='configuracao_individual',
+    )
+    modo_recursos = models.CharField(
+        max_length=16, choices=ConfiguracaoMesa.MODOS_RECURSOS, default='padrao',
+    )
+    sistema_progressao = models.CharField(
+        max_length=16, choices=ConfiguracaoMesa.PROGRESSOES, default='nex',
+    )
+    ferimentos_debilitantes = models.BooleanField(default=False)
+    jogador_pode_subir_nex = models.BooleanField(default=True)
+    numero_sessao = models.PositiveIntegerField(default=1)
+
+    def clean(self):
+        super().clean()
+        if (
+            self.sistema_progressao == 'patentes'
+            and self.modo_recursos != 'sem_sanidade'
+        ):
+            raise ValidationError(
+                'A evolução por patentes usa o modo Sem Sanidade (PV e PD).'
+            )
+
+    def __str__(self):
+        return f'Configuração individual de {self.ficha}'
 
 
 class FichaPericia(models.Model):
@@ -325,7 +380,12 @@ class FichaPericia(models.Model):
     pericia = models.ForeignKey(Pericia, on_delete=models.PROTECT, related_name='fichas')
     grau = models.CharField(max_length=12, choices=GRAUS, default='destreinado')
     especializacao = models.CharField(max_length=80, blank=True)
-    bonus_extra = models.SmallIntegerField(default=0)
+    dados_extra = models.SmallIntegerField(
+        default=0, validators=[MinValueValidator(-10), MaxValueValidator(10)],
+    )
+    bonus_extra = models.SmallIntegerField(
+        default=0, validators=[MinValueValidator(-100), MaxValueValidator(100)],
+    )
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=('ficha', 'pericia'), name='ficha_pericia_unica')]

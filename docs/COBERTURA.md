@@ -32,7 +32,7 @@
 
 ## Carregamento da Fase 2
 
-O comando `python manage.py carregar_regras` carrega JSONs locais em uma transação e atualiza cada registro pelo `slug`. Uma segunda execução não duplica registros. O banco contém 126 registros desta carga:
+O comando `python manage.py carregar_regras` carrega JSONs locais em uma transação e atualiza cada registro pelo `slug`. Uma segunda execução não duplica registros. A carga atual contém 296 registros:
 
 | Catálogo | Quantidade | Fonte impressa |
 | --- | ---: | --- |
@@ -43,10 +43,14 @@ O comando `python manage.py carregar_regras` carrega JSONs locais em uma transa�
 | Patentes | 5 | OPRPG p.52; SaH p.108 |
 | Origens do livro básico | 26 | OPRPG pp.16-21 |
 | Origens do suplemento | 20 | SaH pp.7-13 |
+| Poderes selecionáveis | 143 | OPRPG pp.25-34, 114-116; SaH pp.14-15, 22-23, 26-27, 33-36, 46-47 |
+| Trilhas | 27 trilhas, 102 habilidades | OPRPG pp.26-36; SaH pp.15-32 |
 
 Todos os registros têm `fonte`, `slug` e indicação de `personalizado`. Os resumos são mecânicos e curtos, escritos para a ficha; nenhum capítulo ou bloco longo dos livros foi copiado.
 
-O campo `Poder.pre_requisitos` agora valida e aplica um schema neutro e cumulativo: `classe_slug`, `trilha_slug`, `nex_min`, `estagio_min`, `atributos_min`, `pericias_treinadas` e `poderes`. O seletor de progressão só oferece poderes cujos requisitos a ficha satisfaz; a validação é repetida no POST com a ficha bloqueada. O carregador rejeita campos desconhecidos e valores fora do formato. Os JSONs continuam sem entradas de livro; a implementação do schema não inclui requisitos derivados de conteúdo licenciado.
+`Poder.pre_requisitos` valida requisitos cumulativos de classe/trilha, NEX/nível/estágio/patente, atributos, perícias obrigatórias ou alternativas, poderes anteriores e quantidade mínima de poderes por elemento. O seletor revalida os requisitos no POST. Poderes podem guardar resumo de afinidade e ser marcados repetíveis; a segunda escolha elemental exige a afinidade correspondente. A ficha registra afinidade após NEX equivalente a 50%. O carregador rejeita campos desconhecidos, elementos inválidos e valores fora do formato.
+
+Os 143 registros de poder incluem 72 de classe (contando Transcender e Treinamento em Perícia uma vez), 38 gerais e 33 paranormais. “Resistir a Elemento” está dividido em quatro opções por elemento para permitir validação e escolha na ficha. Os poderes de origem permanecem nos registros de origem e não são duplicados. As 27 trilhas incluem 15 do livro de regras, nove do suplemento e três de Sobrevivente; os marcos ficam disponíveis na ficha, sem automatizar seus efeitos.
 
 ## Conferências realizadas
 
@@ -64,9 +68,9 @@ O campo `Poder.pre_requisitos` agora valida e aplica um schema neutro e cumulati
 
 ## Fora desta carga
 
-- O carregador agora aceita trilhas, poderes, rituais e itens de OPRPG/SaH, com arquivos JSON inicialmente vazios. Os modelos também podem ser mantidos pelo admin restrito ao superusuário; os registros ainda dependem de curadoria e conferência antes de serem adicionados.
+- O carregador aceita trilhas, poderes, rituais e itens de OPRPG/SaH. Os catálogos de habilidades de classe, poderes gerais/paranormais e trilhas foram preenchidos; rituais e itens continuam sem registros. Os modelos também podem ser mantidos pelo admin restrito ao superusuário.
 - Armas, proteções, equipamentos e itens amaldiçoados ainda não têm registros de catálogo; o inventário manual segue disponível.
-- Trilhas, poderes, rituais e itens ainda dependem de curadoria e de dados mecânicos curtos nos JSONs.
+- Rituais, armas, proteções, equipamentos e itens ainda dependem de curadoria autorizada e resumos mecânicos curtos nos JSONs.
 - Dados da comunidade e conteúdo personalizado: nada foi importado; serão incluídos somente por criação própria do mestre.
 
 ## Progressão por NEX (Fase 4)
