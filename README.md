@@ -104,6 +104,15 @@ O `check --deploy` deve ser executado com `DEBUG=False` e valores de produção 
 - [ ] Revise proxy confiável, HSTS e o domínio antes de habilitar preload.
 - [ ] Ative Dependabot e secret scanning nas configurações do repositório GitHub.
 
+### Render
+
+Configure o serviço Web com `bash build.sh` como Build Command e
+`gunicorn config.wsgi:application` como Start Command. Defina `DATABASE_URL`
+para o banco persistente do serviço, além de `SECRET_KEY`, `DEBUG=False`,
+`ALLOWED_HOSTS` e `CSRF_TRUSTED_ORIGINS` para o domínio publicado. O build
+coleta os arquivos estáticos, aplica as migrations e carrega os catálogos
+iniciais de classes, origens e demais regras no banco; essa carga é idempotente.
+
 A recuperação de senha por e-mail fica para uma próxima etapa, depois de configurar e validar um serviço de e-mail.
 
 Consulte [docs/COMO_USAR.md](docs/COMO_USAR.md) para as instruções rápidas de jogadores e mestre.
